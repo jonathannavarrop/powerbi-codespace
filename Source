@@ -2,7 +2,7 @@
 ------------------------------------------
 ## Source/SharePoint
  ### From SharePoint Folder/Individual Files
-  Note: To load individual files from a SharePoint <location>. It sources directly the <file>, not the folder. It's the fastest way for individual files.
+  Note: To load individual files from a SharePoint <location>. Directly target the <file>, not the folder. It's the fastest way for individual files.
 ------------------------------------------
 - (a) Go to the SharePoint folder / Select the interested file / Click on "Open the details pane" (top-right-corner) / Copy "Direct Link" from "Path" 
 - (a) Go to MS Power BI / Get Data / Web / Paste copied "Direct Link" / 
@@ -14,7 +14,7 @@
 --------------------------------------------------------------------------------------------------
  ##Source/SharePoint
   ###From SharePoint Folder/Load Individual-Multiples Files from the folder
-   Note: To load individual or multiples files from a SharePoint <folder>. It sources directly the <folder>, not the file. If we need to load multiples              files from the same SP folder then, this could be a good choice.
+   Note: To load individual or multiples files from a SharePoint <folder>. Directly target the <folder>, not the file. If we need to load multiples              files from the same SP folder then, this could be a good choice.
 --------------------------------------------------------------------------------------------------
 - Go to the SharePoint folder / Copy the main link (no sub-librarys) -> (ie: https://everisgroup.sharepoint.com/sites/BIBDAlicante )
 - Go to MS Power BI / Get Data / SharePoint folder / Paste copied address / Transform
