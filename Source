@@ -1,6 +1,6 @@
-# Loading files from SharePoint in Power BI >
+# Loading files from SharePoint in Power BI
 
-  ## Loading individual files from a SharePoint folder >>
+  ## Loading individual files from a SharePoint folder
 
     To load an individual file from a SharePoint folder in Power BI, follow these steps:
       1. Go to the SharePoint folder and select the file you want to load.
@@ -18,7 +18,7 @@
       6. Delete the "?web=1" from the end of the URL.
 
 
-  ## Loading multiples files from a SharePoint folder>>
+  ## Loading multiples files from a SharePoint folder
 
     To load multiple files from a SharePoint folder in Power BI, follow these steps:
       1. Go to the SharePoint folder and copy the main link (no sub-libraries) (e.g., https://mycompany.sharepoint.com/sites/MySite). 
@@ -32,7 +32,7 @@
         4.5 Expand the [Content] column to combine the files.
 
 
-  ## Combining files from a SharePoint folder>>
+  ## Combining files from a SharePoint folder
 
     To combine files -with the same structure- from a SharePoint folder in Power BI, follow these steps:
       1. Go to the SharePoint folder and copy the main link (no sub-libraries) (e.g., https://mycompany.sharepoint.com/sites/MySite). 
