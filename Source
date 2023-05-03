@@ -1,49 +1,50 @@
-# Source/SharePoint 
-------------------------------------------
-## Source/SharePoint
- ### From SharePoint Folder & Load Individual Files
-  Note: To load <individual> files from a SharePoint folder. Directly target the <file>, not the folder. It's the fastest way for individual files.
-------------------------------------------
-- (a) Go to the SharePoint folder / Select the interested file / Click on "Open the details pane" (top-right-corner) / Copy "Direct Link" from "Path" 
-- (a) Go to MS Power BI / Get Data / Web / Paste copied "Direct Link" / 
-
-- (b) Go to the SharePoint folder / Select the interested file / Open in App (desktop) / File / Info / Copy Path /
-- (b) Go to MS Power BI / Get Data / Web / Paste copied  link from "Copy Path" / Delete in the link from "?web=1"
+< Loading files from SharePoint in Power BI >
 
 
---------------------------------------------------------------------------------------------------
- ##Source/SharePoint
-  ###From SharePoint Folder & Load Multiples Files
-   Note: To load <multiples> files from a SharePoint folder. Directly target the <folder>, not the file. If we need to load multiples files from the same SP          folder then, this could be a good choice.
---------------------------------------------------------------------------------------------------
-- Go to the SharePoint folder / Copy the main link (no sub-librarys) -> (ie: https://everisgroup.sharepoint.com/sites/BIBDAlicante )
-- Go to MS Power BI / Get Data / SharePoint folder / Paste copied address / Transform
-- In Power Query:
-  - Go to the created table
-  - Go to the Source step
-  - Filter column [Folder Path] (ie: Contains "bi"). 
-    Note: If you want to protect your code against sensitive case then add "Text.Lower([Folder Path]" to your code. 
-          If you check your formula bar, it should be "each Text.Contains(Text.Lower([Folder Path], "bi" )
-  - Filter file in column [Name] 
-  - (*) Go to the column [Content] and expand the arrows. Automatically will open the "Combine Files" window / Click "ok" 
-  - Power Query will invoke a function to load the file
-  - If you want to reuse this process for other file:
-    - Go to the step where you filter the file in column [Name] and change the file.
-    - Delete from this step and apply again the steps from (*)
+ << Loading individual files from a SharePoint folder >>
+
+   To load an individual file from a SharePoint folder in Power BI, follow these steps:
+     1. Go to the SharePoint folder and select the file you want to load.
+     2. Click on "Open the details pane" in the top-right corner.
+     3. Copy the "Direct Link" from "Path".
+     4. In Power BI, go to Get Data > Web.
+     5. Paste the copied "Direct Link" into the URL field.
+
+   Alternatively, you can follow these steps:
+     1. Go to the SharePoint folder and select the file you want to load.
+     2. Open the file in the SharePoint app (desktop).
+     3. Go to File > Info and copy the file path.
+     4. In Power BI, go to Get Data > Web.
+     5. Paste the copied link from "Copy Path" into the URL field.
+     6. Delete the "?web=1" from the end of the URL.
+     7. Load multiple files from a SharePoint folder
 
 
---------------------------------------------------------------------------------------------------
-##Source/SharePoint
-###From SharePoint Folder/Combining files with the same structure (ie: same files with Jan,Feb,Mar data)
---------------------------------------------------------------------------------------------------
-- Go to the SharePoint folder / Copy the main address (no sub-librarys) -> (ie: https://everisgroup.sharepoint.com/sites/BIBDAlicante )
-- Go to MS Power BI / Get Data / SharePoint folder / Paste copied address / Transform
-- In Power Query:
-  - Go to the created table
-  - Go to the Source step
-  - Change "SharePoint.Files" by "SharePoint.Contents" in the formula bar
-  - Find the row where [Name] = "Shared Documents" / Go to the column [Content] and click in "Table"
-  - Again, find the row where [Name] = "Folder X" / Go to the column [Content] and click in "Table"
-  - Apply the above steps until you get a list of your -.csv/.xls/.xlsx/etc- files
-  - Rename Query (table) to "SharePointFolder" and Reference this table: will be helpful if the folder name change in the future
-  - Go to the column [Content] and expand the arrows. Automatically will open the "Combine Files" window / Click "ok"
+ <<Loading multiples files from a SharePoint folder>>
+
+   To load multiple files from a SharePoint folder in Power BI, follow these steps:
+     1. Go to the SharePoint folder and copy the main link (no sub-libraries) (e.g., https://mycompany.sharepoint.com/sites/MySite). 
+     2. In Power BI, go to Get Data > SharePoint folder.
+     3. Paste the copied address into the URL field and click Transform.
+     4. In Power Query:
+        4.1 Go to the created table.
+        4.2 Go to the Source step.
+        4.3 Filter the [Folder Path] column to include only the files you want to load.
+        4.4 Filter the [Name] column to include only the file(s) you want to load.
+        4.5 Expand the [Content] column to combine the files.
+
+
+ <<Combining files from a SharePoint folder>>
+
+   To combine files -with the same structure- from a SharePoint folder in Power BI, follow these steps:
+     1. Go to the SharePoint folder and copy the main link (no sub-libraries) (e.g., https://mycompany.sharepoint.com/sites/MySite). 
+     2. In Power BI, go to Get Data > SharePoint folder.
+     3. Paste the copied address into the URL field and click Transform.
+     4. In Power Query:
+        4.1 Go to the created table.
+        4.2 Go to the Source step.
+        4.3 Change "SharePoint.Files" to "SharePoint.Contents" in the formula bar.
+        4.4 Find the row where [Name] = "Shared Documents" and click "Table" in the [Content] column.
+        4.5 Repeat the previous step for each folder containing the files you want to combine.
+        4.6 Combine the files using the "Combine Files" window that appears when you expand the [Content] column.
+        4.7 Rename the query/table to "SharePointFolder" to make it easier to reference in the future.
