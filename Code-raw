@@ -1,0 +1,676 @@
+--- Monthly Credit Exposures ---
+
+	c_cond_form_max_exposure_rating = 
+	// Conditional formatting for Rating //
+		var _Max_exp = MAX ( dim_rating[max_exposure] )
+		var _Result = 
+			SWITCH (
+				TRUE(),
+				[c_total_allocation_as_%_of_total_bs] <= _Max_exp , "#51CA4B",
+				ISBLANK ( _Max_exp ), "",
+				"#FF0101" 
+			)
+		return _Result 	
+		
+	c_internal_ratings_be_no_NR = 
+		// Table Internal Ratings Included - if no NR rating //
+		VAR _c_total_alloc =
+			SUM ( fct_asset_class_rating[allocation_be] )
+		VAR _c_total_alloc_internal =
+			SUM ( fct_internal_rating[allocation_be] )
+		VAR _result =
+			IF (
+				HASONEVALUE ( dim_notch_broad[s2_broad_rating] )
+					&& NOT ( SELECTEDVALUE ( dim_notch_broad[s2_broad_rating] ) = "N/R" ),
+				_c_total_alloc + _c_total_alloc_internal
+			)
+		RETURN
+			_result
+		
+	c_internal_ratings_be_NR = 
+		// Table Internal Ratings Included - NR rating // 
+		VAR _c_total_alloc =
+			SUM ( fct_asset_class_rating[allocation_be] )
+		VAR _c_total_alloc_internal_all =
+			CALCULATE (
+				SUM ( fct_internal_rating[allocation_be] ),
+				ALL ( dim_notch_broad )
+			)
+		VAR _c_total_alloc_NR_apollo_all =
+			CALCULATE (
+				CALCULATE (
+					SUM ( fct_asset_class_rating[allocation_be] ),
+					fct_asset_class_rating[s2_broadrating] = "N/R",
+					fct_asset_class_rating[apollo_internal_classification] = "Property"
+						|| fct_asset_class_rating[apollo_internal_classification] = "Residential Mortgage Loans"
+						|| fct_asset_class_rating[apollo_internal_classification] = "Intra Company Capital"
+						|| fct_asset_class_rating[apollo_internal_classification] = "Cash"
+				),
+				ALL ( dim_notch_broad )
+			)
+		VAR _result =
+			IF (
+				HASONEVALUE ( dim_notch_broad[s2_broad_rating] )
+					&& SELECTEDVALUE ( dim_notch_broad[s2_broad_rating] ) = "N/R",
+				_c_total_alloc - _c_total_alloc_NR_apollo_all - _c_total_alloc_internal_all
+			)
+		RETURN
+		_result
+		
+	c_internal_ratings_be_total = 
+		// Table Internal Ratings Included - Total table // 
+		SUMX (
+			VALUES ( dim_notch_broad ),
+			[c_internal_ratings_be_NR] + [c_internal_ratings_be_no_NR]
+		)
+		
+		
+--- Latest snapshot ---		
+		
+	= Table.SelectRows(fct_climate_stress, each ([yyyymm] = List.Max(fct_climate_stress[yyyymm])))
+	= Table.SelectRows(datatable, each ([yyyymm] = List.Max(datatable[yyyymm])))
+	= Table.SelectRows( #"Removed Other Columns", each ([yyyymm] = List.Max(#"Removed Other Columns"[yyyymm]) ) )
+
+---- Based on other table ---
+	= Table.SelectRows(
+		#"Removed Other Columns",
+		each List.Contains(#"fct_asset_class_rating"[yyyymm], [yyyymm])
+	  )
+	
+--- Compare without make it lowercase in step ---
+	= Text.Lower([apollo_internal_classification]) = "intra company capital"
+	
+	
+--- Connection query ---
+	let
+	    Source = Value.NativeQuery(AmazonRedshift.Database(#"RedshiftHost", #"RedshiftDbName"), 
+	    "select distinct apollointernalclassification, loaddate
+	    from ubs_ods.breakouts_category bc
+	    left outer join risk_reporting_ods.mapping_asset_class mac
+	    on bc.apollointernalclassification = mac.classification 
+	    where mac.classification is null#(lf)
+	    order by 1,2", null, [EnableFolding=true])
+	in
+    Source
+	
+
+
+--- Value distribution ---
+	let
+		 Source = (TableName as table) as table => let
+			 Source = {0..Table.ColumnCount(TableName)-1},
+			 #"Converted to Table" = Table.FromList(Source, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+			 #"Added Custom" = Table.AddColumn(#"Converted to Table", "Column Name", each Table.ColumnNames(TableName){[Column1]}),
+			 #"Added Custom1" = Table.AddColumn(#"Added Custom", "Column Values", each Table.ToColumns(TableName){[Column1]}),
+			 #"Removed Columns" = Table.RemoveColumns(#"Added Custom1",{"Column1"}),
+			 #"Expanded Column Values" = Table.ExpandListColumn(#"Removed Columns", "Column Values"),
+			 #"Grouped Rows" = Table.Group(#"Expanded Column Values", {"Column Name", "Column Values"}, {{"Count", each Table.RowCount(_), Int64.Type}})
+		 in
+			 #"Grouped Rows"
+		 in
+			 Source
+
+
+
+--- Date filter until one year ahead ---
+
+= Table.SelectRows(Source, each [Date] <= Date.AddDays(Date.From(DateTime.LocalNow()),365))
+
+
+
+"IsPreviousFridayOld", each if [date] = Date.AddDays(Date.From(DateTime.LocalNow()),-Date.DayOfWeek(Date.From(DateTime.LocalNow()),5)) then "Y"
+else null)
+
+
+
+
+
+
+
+
+
+
+--- Dynamic date ---
+	c_text_source = "Source: Group Risk, UBS Delta, end of " & Format([c_yyyymm_data],"mmmm yyyy")	
+	c_yyyymm_data = Date(LEFT(max(fct_asset_class_rating[yyyymm]),4),right(max(fct_asset_class_rating[yyyymm]),2),"01")
+	
+	
+	= Table.Profile
+	
+	
+	
+---	Mode - Frecuency =
+	MINX (
+		TOPN (
+			1,
+			ADDCOLUMNS (
+				VALUES ( Data[Value] ),
+				"Frequency", CALCULATE ( COUNT ( Data[Value] ) )
+			),
+			[Frequency],
+			0
+		),
+		Data[Value]
+	)
+
+
+
+--- c_rank_issuer = 
+var _Rank =
+    RANKX (
+        ALL ( fct_asset_class_rating_grouped_issuer ),
+        [c_total_allocation_grouped]
+    )
+var _Result =
+    IF (
+        HASONEVALUE ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+        _Rank,
+        "Total"
+    )
+return
+    _Result
+
+
+c_rank_issuer = 
+var _Rank =
+    RANKX (
+        ALL ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+        [c_total_allocation]
+    )
+var _Result =
+    IF (
+        HASONEVALUE ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+        _Rank,
+        "Total"
+    )
+return
+    _Result
+
+
+--- From period "yyyymm" to date "dd/mm/yyyy" 
+	= Table.AddColumn(#"Changed Type - yyyymm", "Date",
+	each #date( Number.FromText(Text.Start([Date_text], 4)), Number.FromText(Text.Middle([Date_text], 4,2)),1))
+	
+	
+	
+c_text_title1_RLS = 
+VAR _dynamic =
+    SELECTEDVALUE ( RLS[RLS] )
+VAR _title =
+    SWITCH (
+        TRUE (),
+        MIN ( RLS[portfolio_group] ) = "AI"
+            && MAX ( RLS[portfolio_group] ) = "ARE", "ESG INVESTMENT RISK RATING EXPOSURE - IRELAND & BERMUDA",
+        HASONEVALUE ( RLS[RLS] ),
+            "ESG INVESTMENT RISK RATING EXPOSURE" & " - " & _dynamic,
+        "ESG INVESTMENT RISK RATING EXPOSURE"
+    )
+RETURN
+    _title
+	
+	
+c_text_title1_RLS_asset = 
+VAR _dynamic =
+    SELECTEDVALUE ( RLS[RLS] )
+VAR _title =
+    SWITCH (
+        TRUE (),
+        HASONEVALUE ( RLS[RLS] ),
+        "ESG INVESTMENT RISK RATING EXPOSURE" & " - " & _dynamic,
+        "ESG INVESTMENT RISK RATING EXPOSURE"
+    )
+RETURN
+    _title
+
+	
+	
+Portfolio = 
+
+= Table.AddColumn(#"Removed Columns", "portfolio", 
+each if [allocation_nl] <> 0 and [allocation_be] = 0 and [allocation_de] = 0 and [allocation_ie] = 0 and [allocation_bm] = 0 then "VIVAT_TOTAL" 
+else if [allocation_nl] = 0 and [allocation_be] <> 0 and [allocation_de] = 0 and [allocation_ie] = 0 and [allocation_bm] = 0 then "ATHORA_BELGIUM_T" 
+else if [allocation_nl] = 0 and [allocation_be] = 0 and [allocation_de] <> 0 and [allocation_ie] = 0 and [allocation_bm] = 0 then "Athene_Total" 
+else if [allocation_nl] = 0 and [allocation_be] = 0 and [allocation_de] = 0 and [allocation_ie] <> 0 and [allocation_bm] = 0 then "ATHORA_IRELAND" 
+else if [allocation_nl] = 0 and [allocation_be] = 0 and [allocation_de] = 0 and [allocation_ie] = 0 and [allocation_bm] <> 0 then "ATHORA_BERMUDA_T" 
+else "")
+	
+	
+	
+
+
+
+
+
+------------ Overall for portfolios filtered
+c_total_allocation_balance_sheet = 
+CALCULATE (
+    SUMX ( fct_asset_class_rating, fct_asset_class_rating[allocation_total] ),
+    ALL ( dim_asset_class )
+)
+
+
+
+------------
+c_cond_form_max_exposure = 
+// Conditional formatting for 'Top 20 All'
+VAR _Max_Exp_value =
+    SELECTEDVALUE ( fct_asset_class_rating[max_exposure_per_policy] )
+VAR _Max_Exp_value_num =
+    VALUE ( SUBSTITUTE ( _Max_Exp_value, "%", "" ) ) / 100
+VAR _Max_Total_Bal_sheet = [c_total_allocation_as_%_of_total_bs]
+VAR _Result =
+    IF (
+        _Max_Exp_value = "N/A"
+            || ISBLANK ( _Max_Exp_value ),
+        0,
+        IF ( _Max_Total_Bal_sheet > _Max_Exp_value_num, 99, 1 )
+    )
+RETURN
+    _Result
+	
+	
+-------------	
+c_cond_form_max_exposure_exposure = 
+// Conditional formatting for Exposure
+VAR _Exposure = 
+    [c_total_allocation_as_%_of_total_bs]
+
+VAR _Max_exp = 
+    [c_em_constant]
+
+VAR _PercentageLimit = 
+    DIVIDE ( _Exposure, _Max_exp )
+
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        ISBLANK ( _Exposure ) || ISBLANK ( _Max_exp ), "", // No color
+        _Exposure > _Max_exp, "#FF0101", // Red color
+        _PercentageLimit >= 0.9 && _PercentageLimit <= 1, "#FFC000", //Amber color
+        _PercentageLimit < 0.9, "#51CA4B"// Green color
+    )
+
+RETURN
+    _Result
+
+
+--------------
+c_cond_form_max_exposure_grade_internal = 
+VAR Rating_type =
+    SELECTEDVALUE ( fct_asset_class_rating[c_rating_type] )
+VAR Max_Exp_value =
+    SELECTEDVALUE ( dim_rating[max_exposure_ig_sig] )
+VAR Max_Total_Bal_sheet = [c_internal_ratings_total_%_balance_sheet]
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        Rating_type = "Other - Cash & Derivatives", "",
+        Max_Total_Bal_sheet < Max_Exp_value, "#51CA4B",
+        "#FF0101"
+    )
+RETURN
+    _Result
+
+
+--------------
+c_cond_form_max_exposure_rating_internal = 
+// Conditional formatting for Rating (Internal Table)
+VAR _Exposure = 
+    [c_internal_ratings_total_%_balance_sheet]
+
+VAR _Max_exp =
+    MAX ( dim_rating[max_exposure] )
+
+VAR _PercentageLimit = 
+    DIVIDE ( _Exposure, _Max_exp )
+
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        ISBLANK ( _Exposure ) || ISBLANK ( _Max_exp ), "", // No color
+        _Exposure > _Max_exp, "#FF0101", // Red color
+        _PercentageLimit >= 0.9 && _PercentageLimit <= 1, "#FFC000", //Amber color
+        _PercentageLimit < 0.9, "#51CA4B"// Green color
+    )
+    
+RETURN
+    _Result
+
+
+
+
+
+-------------
+c_cond_form_max_exposure_rating = 
+// Conditional formatting for Rating
+VAR _Exposure = 
+    [c_total_allocation_as_%_of_total_bs]
+
+VAR _Max_exp =
+    MAX ( dim_rating[max_exposure] )
+
+VAR _PercentageLimit = 
+    DIVIDE ( _Exposure, _Max_exp )
+
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        ISBLANK ( _Exposure ) || ISBLANK ( _Max_exp ), "", // No color
+        _Exposure > _Max_exp, "#FF0101", // Red color
+        _PercentageLimit >= 0.9 && _PercentageLimit <= 1, "#FFC000", //Amber color
+        _PercentageLimit < 0.9, "#51CA4B"// Green color
+    )
+
+RETURN
+    _Result	
+	
+	
+	
+	
+-------------	
+"#FF0101", // Red color
+"#FFC000", //Amber color	
+	
+	
+	
+-------------	
+Number.ToText([max_exposure_obligor] * 100) & "%"
+
+
+
+
+------------ Worst Performance
+c_alerts_property_country_amber = 
+COUNTX (
+    FILTER (
+        ADDCOLUMNS (
+            SUMMARIZE (
+                VALUES ( dim_country[country_property] ),
+                dim_country[country_property]
+            ),
+            "@HexCode",
+                CALCULATE (
+                    [c_cond_form_max_exposure_property_country],
+                    dim_property_type[property_type] <> BLANK ()
+                )
+        ),
+        [c_cond_form_max_exposure_property_country] = "#FFC000"
+    ),
+    [c_cond_form_max_exposure_property_country]
+)
+
+
+------------ Better Performance 
+EVALUATE
+VAR _TABLE =
+    FILTER (
+        CALCULATETABLE (
+            ADDCOLUMNS (
+                SUMMARIZE (
+                    VALUES ( dim_property_type[property_type] ),
+                    dim_property_type[property_type]
+                ),
+                "@ExposureM", [c_total_allocation],
+                "@Exposure%", [c_total_allocation_as_%_of_total_property],
+                "@Limit", [c_limit_max_exposure_property_sector],
+                "@HexCode", CALCULATE ( [c_cond_form_max_exposure_property] )
+            ),
+            dim_property_type[property_type] <> BLANK ()
+        ),
+        [@HexCode] = "#FF0101"
+    )
+VAR _COUNT =
+    COUNTROWS ( _TABLE )
+RETURN
+    { _COUNT }
+	
+	
+	
+-------------	
+EVALUATE
+VAR _TABLE =
+    FILTER (
+        CALCULATETABLE (
+            ADDCOLUMNS (
+                SUMMARIZE (
+                    VALUES ( dim_property_type[property_type] ),
+                    dim_property_type[property_type]
+                ),
+                "@ExposureM", [c_total_allocation],
+                "@Exposure%", [c_total_allocation_as_%_of_total_property],
+                "@Limit", [c_limit_max_exposure_property_sector],
+                "@HexCode", CALCULATE ( [c_cond_form_max_exposure_property] )
+            ),
+            dim_property_type[property_type] <> BLANK ()
+        ),
+        [@HexCode] = "#FF0101"
+    )
+VAR _COUNT =
+    COUNTROWS ( _TABLE )
+RETURN
+    { _COUNT }
+	
+	
+
+--------------
+EVALUATE
+VAR _TABLE =
+        FILTER (
+            CALCULATETABLE (
+                ADDCOLUMNS (
+                    SUMMARIZE (
+                        VALUES ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+                        fct_asset_class_rating_grouped_issuer[apollo_issuer]
+                    ),
+                    "@Ranking", [c_rank_issuer],
+                    "@ExposureM", [c_total_allocation],
+                    "@Exposure%", [c_total_allocation_as_%_of_total_bs],
+                    "@Limit", [c_limit_max_exposure_obligor],
+                    "@HexCode", CALCULATE ( [c_cond_form_max_exposure_obligor] )
+                ),
+                fct_asset_class_rating[is_required_apollo_int_single_obligor] = 1
+            ),
+            [@Ranking] <= 20 && [@HexCode] = "#FFC000"
+    )
+VAR _COUNT =
+    COUNTROWS ( _TABLE )
+RETURN
+    _TABLE
+	
+	
+	
+---------------	
+CALENDAR ( DATE ( 2000, 07, 01 ), DATE ( 2035, 06, 30 ) )
+YearMonth = FORMAT ( 'Date'[Date], "YYYYMM" ) 
+
+
+---------------
+pep_dynamic_period = 
+VAR _stop_date =
+    MAX ( 'Calendar_dis'[Period] ) // used as slicer
+VAR _result =
+    CALCULATE (
+        DISTINCTCOUNT ( aml_hub_fct_finscan_hits[party_name] ),
+        'Calendar',
+        'Calendar'[Period] <= _stop_date
+    )
+RETURN
+    _result
+	
+	
+
+----------------------- Value from a column based on the max of another column
+CALCULATE (
+	VALUES ( 'Table'[column] ), -- column we want to get
+	'Table'[column_id] = MAX ( 'Table'[column_id] )  -- based on the max of another column
+)
+
+
+Example2 =
+VAR _Source =
+    CALCULATE (
+        VALUES ( Sources[Source] ),
+        Sources[RAG Score] = MIN ( Sources[RAG Score] )
+    )
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        MIN ( Sources[RAG Score] ) = 1,
+            _Source & " " & "not within SLA",
+        MIN ( Sources[RAG Score] ) = 2,
+            _Source & " " & "in valuation progress",
+        MIN ( Sources[RAG Score] ) = 3,
+            _Source & " " & "within SLA",
+        ""
+    )
+RETURN
+    _Result
+
+
+
+
+-----------------------
+with d as (select distinct apollo_issuer, country_id
+from risk_mart.fct_asset_class_rating)
+
+select distinct f.apollo_issuer, f.scenario_a, f.scenario_b, f.scenario_c, d.country_id
+from risk_mart.fct_climate_stress f
+left join d
+on f.apollo_issuer = d.apollo_issuer ;
+
+
+
+select apollo_issuer from (
+with d as (select distinct apollo_issuer, country_id
+from risk_mart.fct_asset_class_rating)
+
+select distinct f.apollo_issuer, f.scenario_a, f.scenario_b, f.scenario_c, d.country_id
+from risk_mart.fct_climate_stress f
+left join d
+on f.apollo_issuer = d.apollo_issuer )
+group by apollo_issuer
+having count (*) > 1;
+
+
+
+with d as (select distinct apollo_issuer, country_id
+from risk_mart.fct_asset_class_rating)
+
+select distinct f.apollo_issuer, f.scenario_a, f.scenario_b, f.scenario_c, d.country_id
+from risk_mart.fct_climate_stress f
+left join d
+on f.apollo_issuer = d.apollo_issuer
+where f.apollo_issuer = 'ROYAL DUTCH SHELL PLC';
+
+
+
+
+------------ Query 1: Duplicates ath_gicslevel1 (sector) in apollo_issuer from fct_internal_rating
+select a.apollo_issuer, count (*)
+from (select distinct ubs_apollo_issuer from risk_mart.fct_internal_rating) i
+inner join (select distinct apollo_issuer, ath_gicslevel1 from risk_mart.fct_asset_class_rating) a
+    on i.ubs_apollo_issuer = a.apollo_issuer
+group by a.apollo_issuer
+having count (*) > 1
+order by a.apollo_issuer;
+
+
+
+---------------
+
+INTERNAL RATINGS
+
+= Table.AddColumn(#"Removed Other Columns", "quarter_end_flag", each if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "03" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "06" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "09" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "12" then "quarter_end" else "", type text)
+
+
+
+
+----------------
+
+ESG INVESTMENT RISK
+
+each if [Month] = "01" then "Jan" else if [Month] = "02" then "Feb" else if [Month] = "03" then "Mar" else if [Month] = "04" then "Apr" else if [Month] = "05" then "May" else if [Month] = "06" then "Jun" else if [Month] = "07" then "Jul" else if [Month] = "08" then "Aug" else if [Month] = "09" then "Sep" else if [Month] = "10" then "Oct" else if [Month] = "11" then "Nov" else if [Month] = "12" then "Dec" else "")
+
+= Table.AddColumn(#"Changed Type - yyyymm", "date", each "01" & "/" & Text.End([yyyymm], 2) & "/" & Text.Start([yyyymm], 4) )
+
+
+
+
+----------------
+
+--Keep last record in a table POWERQUERY
+
+= Table.Group(#"Filtered Rows1", {"party_name"}, {{"table", each Table.Max(_, "hit_id")}})      (remove all from each to }} after group_by)
+
+
+
+let
+    Source = Value.NativeQuery(AmazonRedshift.Database(url,"ods"), "select * from aml_hub.fct_finscan_hits", null, [EnableFolding=true]),
+    #"Removed Other Columns" = Table.SelectColumns(Source,{"hit_id", "party_name", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}),
+    #"Sorted Rows" = Table.Sort(#"Removed Other Columns",{{"hit_id", Order.Ascending}}),
+    #"Filtered Rows" = Table.SelectRows(#"Sorted Rows", each ([fs_client_active_inactive] = "Y") and ([list_record_active_inactive] = "Y") and ([application_name] = "Belgium Group Life - Clients" or [application_name] = "Belgium Group Life - Policyholders" or [application_name] = "Belgium Group Life - UBOs" or [application_name] = "Belgium Individual Life - Clients" or [application_name] = "Belgium Individual Life - Inbound Payments" or [application_name] = "Belgium Individual Life - Policyholders" or [application_name] = "Belgium Individual Life - UBOs") and ([category] = "Athora::DJ_LowRisk_Individuals;Athora::DJ_PEPS" or [category] = "Athora::DJ_PEPS") and ([pair_status] = "Confirmed Hit" or [pair_status] = "Flag For EDD")),
+    #"Grouped Rows" = Table.Group(#"Filtered Rows", {"party_name"}, {{"All rows", each Table.Max(_, "hit_id")}}),
+    #"Expanded All rows" = Table.ExpandRecordColumn(#"Grouped Rows", "All rows", {"hit_id", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}, {"hit_id", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded All rows",{{"hit_id", Int64.Type}, {"list_record_active_inactive", type text}, {"pair_modified_date", type date}, {"pair_status", type text}, {"category", type text}, {"application_id", type text}, {"application_name", type text}, {"inactive_date", type text}, {"fs_client_active_inactive", type text}, {"list_record_deleted_notdeleted", type text}})
+in
+    #"Changed Type"
+	
+	
+	
+	
+	
+	
+--Group rows in the same row
+	--Group by ; Sum 
+= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+    {{"Equipment", each List.Sum([Equipment.1]), type text}})	
+	
+	--Transform code to:
+= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+    {{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
+	
+	
+	
+	
+	--Combine rows into a sinlgle line
+		--transform this
+		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+		{{"Equipment", each List.Sum([Equipment.1]), type text}})
+		
+		-- To this:
+		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+		{{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
+		
+		
+		
+------ Get the first employee_id from an index colum 
+first_employee_index =
+IF (
+    'd_employee 2'[Index]
+        = MINX (
+            FILTER (
+                'd_employee 2',
+                'd_employee 2'[employee_id] = EARLIER ( 'd_employee 2'[employee_id] )
+            ),
+            'd_employee 2'[Index]
+        ),
+    TRUE (),
+    FALSE ()
+)
+
+VAR _employee_status_prev = // Calculate the previous status for each employee //
+CALCULATE (
+    MAX ( 'd_employee 2'[employee_status] ),
+    FILTER (
+        'd_employee 2',
+        'd_employee 2'[Index.1] = EARLIER ( 'd_employee 2'[Index] )
+    )
+)
+
+VAR _Result = IF ( _first_employee = TRUE(), BLANK(), _employee_status_prev )
+
+
+RETURN _Result 
