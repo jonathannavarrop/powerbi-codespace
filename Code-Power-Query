@@ -1,0 +1,135 @@
+# Name: Source - NativeQuery
+## Purpose: Query tables with native SQL
+Source = Value.NativeQuery(dataSource as any, query as text, optional timeout as nullable number, optional options as nullable record)
+dataSource = AmazonRedshift.Database(server as text, database as text, optional options as nullable record) 
+Source = Value.NativeQuery(AmazonRedshift.Database("myredshiftserver.us-west-2.redshift.amazonaws.com:5439","ods"), "select * from aml_hub.fct_finscan_hits", null, [EnableFolding=true])
+
+# Name: Latest Snapshot
+## Purpose: Filter a column (ie: table1[yyyymm] ) based on the max of that column			
+	= Table.SelectRows(table1, each ([yyyymm] = List.Max(table1[yyyymm])))
+	= Table.SelectRows(datatable, each ([yyyymm] = List.Max(datatable[yyyymm])))
+	= Table.SelectRows( #"Previous Step", each ([yyyymm] = List.Max(#"Removed Other Columns"[yyyymm]) ) )
+
+# Name: Latest Snapshot - based on another column 
+## Purpose: Filter a column (ie: table1[yyyymm] ) based on the max of another column (from another table)	
+	= Table.SelectRows( #"Removed Other Columns", each List.Contains(#"fct_asset_class_rating"[yyyymm], [yyyymm])  )
+	
+# Name: Protect your conditional formulas 
+## Purpose: To protect your condicional formulas from lower/upper case	
+	= Text.Lower([column]) = "text to find"
+    = Text.Upper([column]) = "TEXT TO FIND"
+	
+
+
+# Name: Value Distribution 
+## Purpose: Get a table with 
+	let
+        Source = (TableName as table) as table => let
+	    Source = {0..Table.ColumnCount(TableName)-1},
+            #"Converted to Table" = Table.FromList(Source, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+            #"Added Custom" = Table.AddColumn(#"Converted to Table", "Column Name", each Table.ColumnNames(TableName){[Column1]}),
+            #"Added Custom1" = Table.AddColumn(#"Added Custom", "Column Values", each Table.ToColumns(TableName){[Column1]}),
+            #"Removed Columns" = Table.RemoveColumns(#"Added Custom1",{"Column1"}),
+            #"Expanded Column Values" = Table.ExpandListColumn(#"Removed Columns", "Column Values"),
+            #"Grouped Rows" = Table.Group(#"Expanded Column Values", {"Column Name", "Column Values"}, {{"Count", each Table.RowCount(_), Int64.Type}})
+	in
+	    #"Grouped Rows"
+	in
+	    Source
+
+
+
+--- Date filter until one year ahead ---
+
+= Table.SelectRows(Source, each [Date] <= Date.AddDays(Date.From(DateTime.LocalNow()),365))
+
+
+
+"IsPreviousFridayOld", each if [date] = Date.AddDays(Date.From(DateTime.LocalNow()),-Date.DayOfWeek(Date.From(DateTime.LocalNow()),5)) then "Y"
+else null)
+
+
+
+
+	
+	= Table.Profile
+	
+
+--- From period "yyyymm" to date "dd/mm/yyyy" 
+	= Table.AddColumn(#"Changed Type - yyyymm", "Date",
+	each #date( Number.FromText(Text.Start([Date_text], 4)), Number.FromText(Text.Middle([Date_text], 4,2)),1))
+	
+
+	
+
+-------------	
+Number.ToText([max_exposure_obligor] * 100) & "%"
+
+
+
+
+
+
+	
+	
+
+	
+	
+
+
+
+
+= Table.AddColumn(#"Removed Other Columns", "quarter_end_flag", each if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "03" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "06" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "09" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "12" then "quarter_end" else "", type text)
+
+
+each if [Month] = "01" then "Jan" else if [Month] = "02" then "Feb" else if [Month] = "03" then "Mar" else if [Month] = "04" then "Apr" else if [Month] = "05" then "May" else if [Month] = "06" then "Jun" else if [Month] = "07" then "Jul" else if [Month] = "08" then "Aug" else if [Month] = "09" then "Sep" else if [Month] = "10" then "Oct" else if [Month] = "11" then "Nov" else if [Month] = "12" then "Dec" else "")
+
+= Table.AddColumn(#"Changed Type - yyyymm", "date", each "01" & "/" & Text.End([yyyymm], 2) & "/" & Text.Start([yyyymm], 4) )
+
+----------------
+
+--Keep last record in a table POWERQUERY
+
+= Table.Group(#"Filtered Rows1", {"party_name"}, {{"table", each Table.Max(_, "hit_id")}})      (remove all from each to }} after group_by)
+
+
+
+let
+    Source = Value.NativeQuery(AmazonRedshift.Database(url,"ods"), "select * from aml_hub.fct_finscan_hits", null, [EnableFolding=true]),
+    #"Removed Other Columns" = Table.SelectColumns(Source,{"hit_id", "party_name", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}),
+    #"Sorted Rows" = Table.Sort(#"Removed Other Columns",{{"hit_id", Order.Ascending}}),
+    #"Filtered Rows" = Table.SelectRows(#"Sorted Rows", each ([fs_client_active_inactive] = "Y") and ([list_record_active_inactive] = "Y") and ([application_name] = "Belgium Group Life - Clients" or [application_name] = "Belgium Group Life - Policyholders" or [application_name] = "Belgium Group Life - UBOs" or [application_name] = "Belgium Individual Life - Clients" or [application_name] = "Belgium Individual Life - Inbound Payments" or [application_name] = "Belgium Individual Life - Policyholders" or [application_name] = "Belgium Individual Life - UBOs") and ([category] = "Athora::DJ_LowRisk_Individuals;Athora::DJ_PEPS" or [category] = "Athora::DJ_PEPS") and ([pair_status] = "Confirmed Hit" or [pair_status] = "Flag For EDD")),
+    #"Grouped Rows" = Table.Group(#"Filtered Rows", {"party_name"}, {{"All rows", each Table.Max(_, "hit_id")}}),
+    #"Expanded All rows" = Table.ExpandRecordColumn(#"Grouped Rows", "All rows", {"hit_id", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}, {"hit_id", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded All rows",{{"hit_id", Int64.Type}, {"list_record_active_inactive", type text}, {"pair_modified_date", type date}, {"pair_status", type text}, {"category", type text}, {"application_id", type text}, {"application_name", type text}, {"inactive_date", type text}, {"fs_client_active_inactive", type text}, {"list_record_deleted_notdeleted", type text}})
+in
+    #"Changed Type"
+	
+	
+	
+	
+	
+	
+--Group rows in the same row
+	--Group by ; Sum 
+= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+    {{"Equipment", each List.Sum([Equipment.1]), type text}})	
+	
+	--Transform code to:
+= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+    {{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
+	
+	
+	
+	
+	--Combine rows into a sinlgle line
+		--transform this
+		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+		{{"Equipment", each List.Sum([Equipment.1]), type text}})
+		
+		-- To this:
+		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+		{{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
