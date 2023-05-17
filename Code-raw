@@ -674,3 +674,14 @@ VAR _Result = IF ( _first_employee = TRUE(), BLANK(), _employee_status_prev )
 
 
 RETURN _Result 
+
+
+------- Replace value
+
+Table.ReplaceValue(
+  #"Filas filtradas1",
+  each if [Csr] > 47 then [Csr] else false,
+  47,
+  Replacer.ReplaceValue,
+  {"Csr"}
+)
