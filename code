@@ -1,0 +1,1250 @@
+--- Monthly Credit Exposures ---
+
+	c_cond_form_max_exposure_rating = 
+	// Conditional formatting for Rating //
+		var _Max_exp = MAX ( dim_rating[max_exposure] )
+		var _Result = 
+			SWITCH (
+				TRUE(),
+				[c_total_allocation_as_%_of_total_bs] <= _Max_exp , "#51CA4B",
+				ISBLANK ( _Max_exp ), "",
+				"#FF0101" 
+			)
+		return _Result 	
+		
+	c_internal_ratings_be_no_NR = 
+		// Table Internal Ratings Included - if no NR rating //
+		VAR _c_total_alloc =
+			SUM ( fct_asset_class_rating[allocation_be] )
+		VAR _c_total_alloc_internal =
+			SUM ( fct_internal_rating[allocation_be] )
+		VAR _result =
+			IF (
+				HASONEVALUE ( dim_notch_broad[s2_broad_rating] )
+					&& NOT ( SELECTEDVALUE ( dim_notch_broad[s2_broad_rating] ) = "N/R" ),
+				_c_total_alloc + _c_total_alloc_internal
+			)
+		RETURN
+			_result
+		
+	c_internal_ratings_be_NR = 
+		// Table Internal Ratings Included - NR rating // 
+		VAR _c_total_alloc =
+			SUM ( fct_asset_class_rating[allocation_be] )
+		VAR _c_total_alloc_internal_all =
+			CALCULATE (
+				SUM ( fct_internal_rating[allocation_be] ),
+				ALL ( dim_notch_broad )
+			)
+		VAR _c_total_alloc_NR_apollo_all =
+			CALCULATE (
+				CALCULATE (
+					SUM ( fct_asset_class_rating[allocation_be] ),
+					fct_asset_class_rating[s2_broadrating] = "N/R",
+					fct_asset_class_rating[apollo_internal_classification] = "Property"
+						|| fct_asset_class_rating[apollo_internal_classification] = "Residential Mortgage Loans"
+						|| fct_asset_class_rating[apollo_internal_classification] = "Intra Company Capital"
+						|| fct_asset_class_rating[apollo_internal_classification] = "Cash"
+				),
+				ALL ( dim_notch_broad )
+			)
+		VAR _result =
+			IF (
+				HASONEVALUE ( dim_notch_broad[s2_broad_rating] )
+					&& SELECTEDVALUE ( dim_notch_broad[s2_broad_rating] ) = "N/R",
+				_c_total_alloc - _c_total_alloc_NR_apollo_all - _c_total_alloc_internal_all
+			)
+		RETURN
+		_result
+		
+	c_internal_ratings_be_total = 
+		// Table Internal Ratings Included - Total table // 
+		SUMX (
+			VALUES ( dim_notch_broad ),
+			[c_internal_ratings_be_NR] + [c_internal_ratings_be_no_NR]
+		)
+		
+		
+--- Latest snapshot ---		
+		
+	= Table.SelectRows(fct_climate_stress, each ([yyyymm] = List.Max(fct_climate_stress[yyyymm])))
+	= Table.SelectRows(datatable, each ([yyyymm] = List.Max(datatable[yyyymm])))
+	= Table.SelectRows( #"Removed Other Columns", each ([yyyymm] = List.Max(#"Removed Other Columns"[yyyymm]) ) )
+	= Table.SelectRows(#"Removed Other Columns", let = latest = List.Max(#"Removed Other Columns"[ddyyyymm]) in each [ddyyyymm] = latest
+---- Based on other table ---
+	= Table.SelectRows(
+		#"Removed Other Columns",
+		each List.Contains(#"fct_asset_class_rating"[yyyymm], [yyyymm])
+	  )
+	
+--- Compare without make it lowercase in step ---
+	= Text.Lower([apollo_internal_classification]) = "intra company capital"
+	
+	
+--- Connection query ---
+	let
+	    Source = Value.NativeQuery(AmazonRedshift.Database(#"RedshiftHost", #"RedshiftDbName"), 
+	    "select distinct apollointernalclassification, loaddate
+	    from ubs_ods.breakouts_category bc
+	    left outer join risk_reporting_ods.mapping_asset_class mac
+	    on bc.apollointernalclassification = mac.classification 
+	    where mac.classification is null#(lf)
+	    order by 1,2", null, [EnableFolding=true])
+	in
+    Source
+	
+
+
+--- Value distribution ---
+	let
+		 Source = (TableName as table) as table => let
+			 Source = {0..Table.ColumnCount(TableName)-1},
+			 #"Converted to Table" = Table.FromList(Source, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+			 #"Added Custom" = Table.AddColumn(#"Converted to Table", "Column Name", each Table.ColumnNames(TableName){[Column1]}),
+			 #"Added Custom1" = Table.AddColumn(#"Added Custom", "Column Values", each Table.ToColumns(TableName){[Column1]}),
+			 #"Removed Columns" = Table.RemoveColumns(#"Added Custom1",{"Column1"}),
+			 #"Expanded Column Values" = Table.ExpandListColumn(#"Removed Columns", "Column Values"),
+			 #"Grouped Rows" = Table.Group(#"Expanded Column Values", {"Column Name", "Column Values"}, {{"Count", each Table.RowCount(_), Int64.Type}})
+		 in
+			 #"Grouped Rows"
+		 in
+			 Source
+
+
+
+--- Date filter until one year ahead ---
+
+= Table.SelectRows(Source, each [Date] <= Date.AddDays(Date.From(DateTime.LocalNow()),365))
+
+
+
+"IsPreviousFridayOld", each if [date] = Date.AddDays(Date.From(DateTime.LocalNow()),-Date.DayOfWeek(Date.From(DateTime.LocalNow()),5)) then "Y"
+else null)
+
+
+
+
+
+
+
+
+
+
+--- Dynamic date ---
+	c_text_source = "Source: Group Risk, UBS Delta, end of " & Format([c_yyyymm_data],"mmmm yyyy")	
+	c_yyyymm_data = Date(LEFT(max(fct_asset_class_rating[yyyymm]),4),right(max(fct_asset_class_rating[yyyymm]),2),"01")
+	
+	
+	= Table.Profile
+	
+	
+	
+---	Mode - Frecuency =
+	MINX (
+		TOPN (
+			1,
+			ADDCOLUMNS (
+				VALUES ( Data[Value] ),
+				"Frequency", CALCULATE ( COUNT ( Data[Value] ) )
+			),
+			[Frequency],
+			0
+		),
+		Data[Value]
+	)
+
+
+
+--- c_rank_issuer = 
+var _Rank =
+    RANKX (
+        ALL ( fct_asset_class_rating_grouped_issuer ),
+        [c_total_allocation_grouped]
+    )
+var _Result =
+    IF (
+        HASONEVALUE ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+        _Rank,
+        "Total"
+    )
+return
+    _Result
+
+
+c_rank_issuer = 
+var _Rank =
+    RANKX (
+        ALL ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+        [c_total_allocation]
+    )
+var _Result =
+    IF (
+        HASONEVALUE ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+        _Rank,
+        "Total"
+    )
+return
+    _Result
+
+
+--- From period "yyyymm" to date "dd/mm/yyyy" 
+	= Table.AddColumn(#"Changed Type - yyyymm", "Date",
+	each #date( Number.FromText(Text.Start([Date_text], 4)), Number.FromText(Text.Middle([Date_text], 4,2)),1))
+	
+	
+	
+c_text_title1_RLS = 
+VAR _dynamic =
+    SELECTEDVALUE ( RLS[RLS] )
+VAR _title =
+    SWITCH (
+        TRUE (),
+        MIN ( RLS[portfolio_group] ) = "AI"
+            && MAX ( RLS[portfolio_group] ) = "ARE", "ESG INVESTMENT RISK RATING EXPOSURE - IRELAND & BERMUDA",
+        HASONEVALUE ( RLS[RLS] ),
+            "ESG INVESTMENT RISK RATING EXPOSURE" & " - " & _dynamic,
+        "ESG INVESTMENT RISK RATING EXPOSURE"
+    )
+RETURN
+    _title
+	
+	
+c_text_title1_RLS_asset = 
+VAR _dynamic =
+    SELECTEDVALUE ( RLS[RLS] )
+VAR _title =
+    SWITCH (
+        TRUE (),
+        HASONEVALUE ( RLS[RLS] ),
+        "ESG INVESTMENT RISK RATING EXPOSURE" & " - " & _dynamic,
+        "ESG INVESTMENT RISK RATING EXPOSURE"
+    )
+RETURN
+    _title
+
+	
+	
+Portfolio = 
+
+= Table.AddColumn(#"Removed Columns", "portfolio", 
+each if [allocation_nl] <> 0 and [allocation_be] = 0 and [allocation_de] = 0 and [allocation_ie] = 0 and [allocation_bm] = 0 then "VIVAT_TOTAL" 
+else if [allocation_nl] = 0 and [allocation_be] <> 0 and [allocation_de] = 0 and [allocation_ie] = 0 and [allocation_bm] = 0 then "ATHORA_BELGIUM_T" 
+else if [allocation_nl] = 0 and [allocation_be] = 0 and [allocation_de] <> 0 and [allocation_ie] = 0 and [allocation_bm] = 0 then "Athene_Total" 
+else if [allocation_nl] = 0 and [allocation_be] = 0 and [allocation_de] = 0 and [allocation_ie] <> 0 and [allocation_bm] = 0 then "ATHORA_IRELAND" 
+else if [allocation_nl] = 0 and [allocation_be] = 0 and [allocation_de] = 0 and [allocation_ie] = 0 and [allocation_bm] <> 0 then "ATHORA_BERMUDA_T" 
+else "")
+	
+	
+	
+
+
+
+
+
+------------ Overall for portfolios filtered
+c_total_allocation_balance_sheet = 
+CALCULATE (
+    SUMX ( fct_asset_class_rating, fct_asset_class_rating[allocation_total] ),
+    ALL ( dim_asset_class )
+)
+
+
+
+------------
+c_cond_form_max_exposure = 
+// Conditional formatting for 'Top 20 All'
+VAR _Max_Exp_value =
+    SELECTEDVALUE ( fct_asset_class_rating[max_exposure_per_policy] )
+VAR _Max_Exp_value_num =
+    VALUE ( SUBSTITUTE ( _Max_Exp_value, "%", "" ) ) / 100
+VAR _Max_Total_Bal_sheet = [c_total_allocation_as_%_of_total_bs]
+VAR _Result =
+    IF (
+        _Max_Exp_value = "N/A"
+            || ISBLANK ( _Max_Exp_value ),
+        0,
+        IF ( _Max_Total_Bal_sheet > _Max_Exp_value_num, 99, 1 )
+    )
+RETURN
+    _Result
+	
+	
+-------------	
+c_cond_form_max_exposure_exposure = 
+// Conditional formatting for Exposure
+VAR _Exposure = 
+    [c_total_allocation_as_%_of_total_bs]
+
+VAR _Max_exp = 
+    [c_em_constant]
+
+VAR _PercentageLimit = 
+    DIVIDE ( _Exposure, _Max_exp )
+
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        ISBLANK ( _Exposure ) || ISBLANK ( _Max_exp ), "", // No color
+        _Exposure > _Max_exp, "#FF0101", // Red color
+        _PercentageLimit >= 0.9 && _PercentageLimit <= 1, "#FFC000", //Amber color
+        _PercentageLimit < 0.9, "#51CA4B"// Green color
+    )
+
+RETURN
+    _Result
+
+
+--------------
+c_cond_form_max_exposure_grade_internal = 
+VAR Rating_type =
+    SELECTEDVALUE ( fct_asset_class_rating[c_rating_type] )
+VAR Max_Exp_value =
+    SELECTEDVALUE ( dim_rating[max_exposure_ig_sig] )
+VAR Max_Total_Bal_sheet = [c_internal_ratings_total_%_balance_sheet]
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        Rating_type = "Other - Cash & Derivatives", "",
+        Max_Total_Bal_sheet < Max_Exp_value, "#51CA4B",
+        "#FF0101"
+    )
+RETURN
+    _Result
+
+
+--------------
+c_cond_form_max_exposure_rating_internal = 
+// Conditional formatting for Rating (Internal Table)
+VAR _Exposure = 
+    [c_internal_ratings_total_%_balance_sheet]
+
+VAR _Max_exp =
+    MAX ( dim_rating[max_exposure] )
+
+VAR _PercentageLimit = 
+    DIVIDE ( _Exposure, _Max_exp )
+
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        ISBLANK ( _Exposure ) || ISBLANK ( _Max_exp ), "", // No color
+        _Exposure > _Max_exp, "#FF0101", // Red color
+        _PercentageLimit >= 0.9 && _PercentageLimit <= 1, "#FFC000", //Amber color
+        _PercentageLimit < 0.9, "#51CA4B"// Green color
+    )
+    
+RETURN
+    _Result
+
+
+
+
+
+-------------
+c_cond_form_max_exposure_rating = 
+// Conditional formatting for Rating
+VAR _Exposure = 
+    [c_total_allocation_as_%_of_total_bs]
+
+VAR _Max_exp =
+    MAX ( dim_rating[max_exposure] )
+
+VAR _PercentageLimit = 
+    DIVIDE ( _Exposure, _Max_exp )
+
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        ISBLANK ( _Exposure ) || ISBLANK ( _Max_exp ), "", // No color
+        _Exposure > _Max_exp, "#FF0101", // Red color
+        _PercentageLimit >= 0.9 && _PercentageLimit <= 1, "#FFC000", //Amber color
+        _PercentageLimit < 0.9, "#51CA4B"// Green color
+    )
+
+RETURN
+    _Result	
+	
+	
+	
+	
+-------------	
+"#FF0101", // Red color
+"#FFC000", //Amber color	
+	
+	
+	
+-------------	
+Number.ToText([max_exposure_obligor] * 100) & "%"
+
+
+
+
+------------ Worst Performance
+c_alerts_property_country_amber = 
+COUNTX (
+    FILTER (
+        ADDCOLUMNS (
+            SUMMARIZE (
+                VALUES ( dim_country[country_property] ),
+                dim_country[country_property]
+            ),
+            "@HexCode",
+                CALCULATE (
+                    [c_cond_form_max_exposure_property_country],
+                    dim_property_type[property_type] <> BLANK ()
+                )
+        ),
+        [c_cond_form_max_exposure_property_country] = "#FFC000"
+    ),
+    [c_cond_form_max_exposure_property_country]
+)
+
+
+------------ Better Performance 
+EVALUATE
+VAR _TABLE =
+    FILTER (
+        CALCULATETABLE (
+            ADDCOLUMNS (
+                SUMMARIZE (
+                    VALUES ( dim_property_type[property_type] ),
+                    dim_property_type[property_type]
+                ),
+                "@ExposureM", [c_total_allocation],
+                "@Exposure%", [c_total_allocation_as_%_of_total_property],
+                "@Limit", [c_limit_max_exposure_property_sector],
+                "@HexCode", CALCULATE ( [c_cond_form_max_exposure_property] )
+            ),
+            dim_property_type[property_type] <> BLANK ()
+        ),
+        [@HexCode] = "#FF0101"
+    )
+VAR _COUNT =
+    COUNTROWS ( _TABLE )
+RETURN
+    { _COUNT }
+	
+	
+	
+-------------	
+EVALUATE
+VAR _TABLE =
+    FILTER (
+        CALCULATETABLE (
+            ADDCOLUMNS (
+                SUMMARIZE (
+                    VALUES ( dim_property_type[property_type] ),
+                    dim_property_type[property_type]
+                ),
+                "@ExposureM", [c_total_allocation],
+                "@Exposure%", [c_total_allocation_as_%_of_total_property],
+                "@Limit", [c_limit_max_exposure_property_sector],
+                "@HexCode", CALCULATE ( [c_cond_form_max_exposure_property] )
+            ),
+            dim_property_type[property_type] <> BLANK ()
+        ),
+        [@HexCode] = "#FF0101"
+    )
+VAR _COUNT =
+    COUNTROWS ( _TABLE )
+RETURN
+    { _COUNT }
+	
+	
+
+--------------
+EVALUATE
+VAR _TABLE =
+        FILTER (
+            CALCULATETABLE (
+                ADDCOLUMNS (
+                    SUMMARIZE (
+                        VALUES ( fct_asset_class_rating_grouped_issuer[apollo_issuer] ),
+                        fct_asset_class_rating_grouped_issuer[apollo_issuer]
+                    ),
+                    "@Ranking", [c_rank_issuer],
+                    "@ExposureM", [c_total_allocation],
+                    "@Exposure%", [c_total_allocation_as_%_of_total_bs],
+                    "@Limit", [c_limit_max_exposure_obligor],
+                    "@HexCode", CALCULATE ( [c_cond_form_max_exposure_obligor] )
+                ),
+                fct_asset_class_rating[is_required_apollo_int_single_obligor] = 1
+            ),
+            [@Ranking] <= 20 && [@HexCode] = "#FFC000"
+    )
+VAR _COUNT =
+    COUNTROWS ( _TABLE )
+RETURN
+    _TABLE
+	
+	
+	
+---------------	
+CALENDAR ( DATE ( 2000, 07, 01 ), DATE ( 2035, 06, 30 ) )
+YearMonth = FORMAT ( 'Date'[Date], "YYYYMM" ) 
+
+
+---------------
+pep_dynamic_period = 
+VAR _stop_date =
+    MAX ( 'Calendar_dis'[Period] ) // used as slicer
+VAR _result =
+    CALCULATE (
+        DISTINCTCOUNT ( aml_hub_fct_finscan_hits[party_name] ),
+        'Calendar',
+        'Calendar'[Period] <= _stop_date
+    )
+RETURN
+    _result
+	
+	
+
+----------------------- Value from a column based on the max of another column
+CALCULATE (
+	VALUES ( 'Table'[column] ), -- column we want to get
+	'Table'[column_id] = MAX ( 'Table'[column_id] )  -- based on the max of another column
+)
+
+
+Example2 =
+VAR _Source =
+    CALCULATE (
+        VALUES ( Sources[Source] ),
+        Sources[RAG Score] = MIN ( Sources[RAG Score] )
+    )
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        MIN ( Sources[RAG Score] ) = 1,
+            _Source & " " & "not within SLA",
+        MIN ( Sources[RAG Score] ) = 2,
+            _Source & " " & "in valuation progress",
+        MIN ( Sources[RAG Score] ) = 3,
+            _Source & " " & "within SLA",
+        ""
+    )
+RETURN
+    _Result
+
+
+
+
+-----------------------
+with d as (select distinct apollo_issuer, country_id
+from risk_mart.fct_asset_class_rating)
+
+select distinct f.apollo_issuer, f.scenario_a, f.scenario_b, f.scenario_c, d.country_id
+from risk_mart.fct_climate_stress f
+left join d
+on f.apollo_issuer = d.apollo_issuer ;
+
+
+
+select apollo_issuer from (
+with d as (select distinct apollo_issuer, country_id
+from risk_mart.fct_asset_class_rating)
+
+select distinct f.apollo_issuer, f.scenario_a, f.scenario_b, f.scenario_c, d.country_id
+from risk_mart.fct_climate_stress f
+left join d
+on f.apollo_issuer = d.apollo_issuer )
+group by apollo_issuer
+having count (*) > 1;
+
+
+
+with d as (select distinct apollo_issuer, country_id
+from risk_mart.fct_asset_class_rating)
+
+select distinct f.apollo_issuer, f.scenario_a, f.scenario_b, f.scenario_c, d.country_id
+from risk_mart.fct_climate_stress f
+left join d
+on f.apollo_issuer = d.apollo_issuer
+where f.apollo_issuer = 'ROYAL DUTCH SHELL PLC';
+
+
+
+
+------------ Query 1: Duplicates ath_gicslevel1 (sector) in apollo_issuer from fct_internal_rating
+select a.apollo_issuer, count (*)
+from (select distinct ubs_apollo_issuer from risk_mart.fct_internal_rating) i
+inner join (select distinct apollo_issuer, ath_gicslevel1 from risk_mart.fct_asset_class_rating) a
+    on i.ubs_apollo_issuer = a.apollo_issuer
+group by a.apollo_issuer
+having count (*) > 1
+order by a.apollo_issuer;
+
+
+
+---------------
+
+INTERNAL RATINGS
+
+= Table.AddColumn(#"Removed Other Columns", "quarter_end_flag", each if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "03" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "06" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "09" then "quarter_end" 
+else if Text.Middle(Text.From([yyyymm], "en-IE"), 4, 2) = "12" then "quarter_end" else "", type text)
+
+
+
+
+----------------
+
+ESG INVESTMENT RISK
+
+each if [Month] = "01" then "Jan" else if [Month] = "02" then "Feb" else if [Month] = "03" then "Mar" else if [Month] = "04" then "Apr" else if [Month] = "05" then "May" else if [Month] = "06" then "Jun" else if [Month] = "07" then "Jul" else if [Month] = "08" then "Aug" else if [Month] = "09" then "Sep" else if [Month] = "10" then "Oct" else if [Month] = "11" then "Nov" else if [Month] = "12" then "Dec" else "")
+
+= Table.AddColumn(#"Changed Type - yyyymm", "date", each "01" & "/" & Text.End([yyyymm], 2) & "/" & Text.Start([yyyymm], 4) )
+
+
+
+
+----------------
+
+--Keep last record in a table POWERQUERY
+
+= Table.Group(#"Filtered Rows1", {"party_name"}, {{"table", each Table.Max(_, "hit_id")}})      (remove all from each to }} after group_by)
+
+
+
+let
+    Source = Value.NativeQuery(AmazonRedshift.Database(url,"ods"), "select * from aml_hub.fct_finscan_hits", null, [EnableFolding=true]),
+    #"Removed Other Columns" = Table.SelectColumns(Source,{"hit_id", "party_name", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}),
+    #"Sorted Rows" = Table.Sort(#"Removed Other Columns",{{"hit_id", Order.Ascending}}),
+    #"Filtered Rows" = Table.SelectRows(#"Sorted Rows", each ([fs_client_active_inactive] = "Y") and ([list_record_active_inactive] = "Y") and ([application_name] = "Belgium Group Life - Clients" or [application_name] = "Belgium Group Life - Policyholders" or [application_name] = "Belgium Group Life - UBOs" or [application_name] = "Belgium Individual Life - Clients" or [application_name] = "Belgium Individual Life - Inbound Payments" or [application_name] = "Belgium Individual Life - Policyholders" or [application_name] = "Belgium Individual Life - UBOs") and ([category] = "Athora::DJ_LowRisk_Individuals;Athora::DJ_PEPS" or [category] = "Athora::DJ_PEPS") and ([pair_status] = "Confirmed Hit" or [pair_status] = "Flag For EDD")),
+    #"Grouped Rows" = Table.Group(#"Filtered Rows", {"party_name"}, {{"All rows", each Table.Max(_, "hit_id")}}),
+    #"Expanded All rows" = Table.ExpandRecordColumn(#"Grouped Rows", "All rows", {"hit_id", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}, {"hit_id", "list_record_active_inactive", "pair_modified_date", "pair_status", "category", "application_id", "application_name", "inactive_date", "fs_client_active_inactive", "list_record_deleted_notdeleted"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded All rows",{{"hit_id", Int64.Type}, {"list_record_active_inactive", type text}, {"pair_modified_date", type date}, {"pair_status", type text}, {"category", type text}, {"application_id", type text}, {"application_name", type text}, {"inactive_date", type text}, {"fs_client_active_inactive", type text}, {"list_record_deleted_notdeleted", type text}})
+in
+    #"Changed Type"
+	
+	
+	
+	
+	
+	
+--Group rows in the same row
+	--Group by ; Sum 
+= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+    {{"Equipment", each List.Sum([Equipment.1]), type text}})	
+	
+	--Transform code to:
+= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+    {{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
+	
+	
+	
+	
+	--Combine rows into a sinlgle line
+		--transform this
+		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+		{{"Equipment", each List.Sum([Equipment.1]), type text}})
+		
+		-- To this:
+		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
+		{{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
+		
+		
+		
+------ Get the first employee_id from an index colum 
+first_employee_index =
+IF (
+    'd_employee 2'[Index]
+        = MINX (
+            FILTER (
+                'd_employee 2',
+                'd_employee 2'[employee_id] = EARLIER ( 'd_employee 2'[employee_id] )
+            ),
+            'd_employee 2'[Index]
+        ),
+    TRUE (),
+    FALSE ()
+)
+
+VAR _employee_status_prev = // Calculate the previous status for each employee //
+CALCULATE (
+    MAX ( 'd_employee 2'[employee_status] ),
+    FILTER (
+        'd_employee 2',
+        'd_employee 2'[Index.1] = EARLIER ( 'd_employee 2'[Index] )
+    )
+)
+
+VAR _Result = IF ( _first_employee = TRUE(), BLANK(), _employee_status_prev )
+
+
+RETURN _Result 
+
+
+
+= Table.AddColumn(#"Changed Type", "Custom", each 
+let AllDates = {Number.From([period_start])..Number.From([period_end])},
+    StartOfMonth = List.Distinct( List.InsertRange( List.Transform( AllDates, each Date.StartOfMonth(Date.From(_))),0, {[Start Date]} )) in StartOfMonth )
+	
+	
+	
+	--- Calendar table filter date column 
+	Filter = IF ( LOOKUPVALUE ( Data[Date], Data[Date], Calendar[Date] ), 1, 0 )
+	
+	
+	
+	
+	
+------- Waterfall chart with different Categories (personalized) starting from 0 
+
+Topic 4 Waterfall (€) = 
+VAR _Reported_Bel_PQ = [AoC - Reported Bel - Gross - Prev. Qtr (€)]
+VAR _Roll_Forward_Impact = [AoC Impact - Roll Forward vs Reported Bel (PQ) - Gross - Curr. Qtr (€) ]
+VAR _Interest_Rates_Impact = [AoC Impact - Int. Rates vs Roll Forward - Gross - Curr. Qtr (€)]
+VAR _Portfolio_Update_Impact = [AoC Impact - Portfolio Update vs Int. Rates - Gross - Curr. Qtr (€)]
+VAR _Allocation_Update_Impact = [AoC Impact - Allocation Change vs Portfolio Update - Gross - Curr. Qtr (€)]
+VAR _Reported_Bel_CQ = [AoC - Reported Bel - Gross - Curr. Qtr (€)]
+VAR _Result =
+SWITCH (
+    SELECTEDVALUE ( Topic_4_Waterfall_parent[Parent] ),
+    "Reported BEL - Prev. Qtr", SWITCH (
+        SELECTEDVALUE ( Topic_4_Waterfall_child[Child] ),
+        "Roll Forward", _Roll_Forward_Impact,
+        "Interest Rates", _Interest_Rates_Impact,
+        "Portfolio Update", _Portfolio_Update_Impact,
+        "Allocation Update", _Allocation_Update_Impact,
+        [AoC - Reported Bel - Gross - Prev. Qtr (€)]
+    ),
+    "Reported BEL - Curr. Qtr", SWITCH (
+        SELECTEDVALUE (  Topic_4_Waterfall_child[Child] ),
+        "Roll Forward",0,
+        "Interest Rates", 0,
+        "Portfolio Update", 0,
+        "Allocation Update", 0 ,
+        [AoC - Reported Bel - Gross - Curr. Qtr (€)]
+        ))
+RETURN
+   _Result    
+   
+   
+   
+   ---- OFFSET
+   
+   Topic 3 - Impact (€m) =
+VAR _Prev_Step =
+    CALCULATE (
+        [Topic 3 - Curr. Qtr (€m)],
+        ALL ( Topic_3 ),
+        OFFSET ( -1, ALL ( Topic_3[step_sort] ), ORDERBY ( Topic_3[step_sort], ASC ) )
+    )
+VAR _Curr_Step = [Topic 3 - Curr. Qtr (€m)]
+VAR _Result =
+    IF ( ISBLANK ( _Prev_Step ), 0, _Curr_Step - _Prev_Step )
+RETURN
+    _Result
+	
+	
+	
+	---- DYNAMIC IMPACT OFFSET ----
+	
+	    CALCULATE (
+        [Topic 3 - SBA - Gross - Curr. Qtr],
+        OFFSET (
+            -1,
+            SUMMARIZE( ALLSELECTED( Topic_3_SBA ),
+            Topic_3_SBA[step_sort],
+            Topic_3_SBA[step_name],
+            "@Value", [Topic 3 - SBA - Net - Curr. Qtr] ),
+            ORDERBY ( Topic_3_SBA[step_sort] )
+        )
+    )
+	
+	
+	
+	
+	
+----- is in the las x days PQ
+= Table.AddColumn(Source, "isin_last_4days", each 
+let limit = DateTime.LocalNow() - Duration.From(1) * 4,
+    condition = if [last_modified_date] < limit then "no" else "yes"
+in condition, type text )
+
+
+
+------- is in current day PQ
+= Table.AddColumn(Source, "isin_current_day", each if Date.IsInCurrentDay([last_load_date]) then "yes" else "no", type text )
+
+
+------ last report refresh PQ 
+= #table(type table [last_refresh_date = datetime], {{DateTime.LocalNow()}})
+
+
+
+---- SharePoint
+"File", each Excel.Workbook([Content], true)))
+
+
+---- Group different rows into a single row 
+= Table.Group(#"Sorted Rows", {"ISSUE_ID", "ISSUE_KEY"}, {{"LABEL_NAME", each Text.Combine([NAME], ", "), type text}})
+
+
+---- Detect if one slicer is selected or not 
+Measure =
+VAR _BU_filtered =
+    INT ( ISFILTERED ( 'costcentre_mart-dim_cost_centres'[Business Unit] ) )  // returns 1 if any BU is selected or 0 if nothing is selected //
+VAR _Result =
+    IF (
+        _BU_Filtered = 0,
+        BLANK (), 
+MAX ( 'costcentre_mart-dim_cost_centres'[Business Unit] )  // change this table/column by the comments table
+    )
+RETURN
+    _Result
+	
+#EBS Project
+
+## Initial Analysis
+
+### Files
+	- Undelimited tables: create Excel tables to delimite the columns/rows and avoid load blanks into PBI.
+	- Check consistency throught columns (abrevations, lower/upper, etc):
+		- Column 'Entity': 												 						
+			Elim | [Split SBA Corp_2023 Q1 - Clean_Ouptut.xlsm]
+			Eliminations | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			
+			AHL | [Analysis_of_Change_v1.0_23Q1_Output.xlsm]
+			AHL_Solo | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			
+		- Column 'Variable':
+			Gross_BEL_CC | [Analysis_of_Change_v1.0_23Q1_Output.xlsm]
+			GROSS_BEL_CC |
+			
+			Gross_BEL_TOTAL | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			GROSS_BEL_TOTAL |
+			
+			Net_BEL_CC | [Analysis_of_Change_v1.0_23Q1_Output.xlsm]
+			NET_BEL_CC |
+			
+			Net_BEL_TOTAL | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			NET_BEL_TOTAL |
+			
+		- Column 'Step':
+			n.a. | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			n.a | 
+			
+		- Column 'Risk_Cat': 
+			Rider | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			Riders | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			
+			Stop-Loss | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			Stop Loss | [AHL_Consol_EBS_TP_Insurance Risk_v1.4_23Q1_run9_Output.xlsm]
+			
+			
+			
+## Topic 1
+Gross BEL - Life (before cap) = ‘Gross BEL – Life’ – ‘Cap Impact’
+•	Gross BEL – Life = Group_Q1_2023_GROSS_BEL_TOTAL_Reported_Total _n.a._Trad_EBS_n.a._n.a.
+•	Cap Impact = Group_Q1_2023_GROSS_BEL_Reported_SBA_Cap-Impact_Total_EBS_n.a_n.a
+
+Reinsurance recoverables in the two ways you have mentioned:
+•	Using the variable already in the data set: Group_Q4_2022_RR_BEL_TOTAL_Reported_Total _n.a._Trad_EBS_n.a._n.a. ;
+•	Or, we can calculate it as GROSS BEL – NET BEL (A – C)
+
+Net BEL – Life = Group_Q1_2023_NET_BEL_TOTAL_Reported_Total _n.a._Trad_EBS_n.a._n.a.
+
+Unit Linked Reserves = Group_Q1_2023_NET_BEL_TOTAL_Reported_Total _n.a._UL_EBS_n.a._n.a. 
+					OR Group_Q1_2023_GROSS_BEL_TOTAL_Reported_Total _n.a._UL_EBS_n.a._n.a.
+
+Risk Margin – Life = Group_Q1_2023_n.a._RM_TOTAL_Reported_Total _n.a._Trad_EBS_n.a._n.a.
+
+Total Technical Provision (before cap) = ‘Net BEL’ + ‘Unit Linked Reserves’ + ‘Risk Margin – Life’
+
+Total Technical Provision (after cap) = ‘Total Technical Provision (before cap)’ + ‘Cap Impact’
+
+
+
+## Topic 2
+SBA Gross BEL (before cap): This is a sum of the entities excluding Eliminations, with the cap removed.
+
+(ANL_Q1_2023_GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a. 
++ AB_Q1_2023_GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a. 
++ AHL_Q1_2023_GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a. 
++ ADKG_Q1_2023_GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ AIT_Q1_2023_GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ ARE_Q1_2023_GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.) 
+-	Group_Q1_2023_GROSS_BEL_Reported_SBA_Cap-Impact_Total_EBS_n.a_n.a
+
+
+BMA Corporate Curve BEL: In this calc, we sum up the entities and remove Separate Accounts (SA):
+
+(ANL_Q1_2023_GROSS_BEL_CC_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ AB_Q1_2023_GROSS_BEL_CC_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ AHL_Q1_2023_GROSS_BEL_CC_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ ADKG_Q1_2023_GROSS_BEL_CC_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ AIT_Q1_2023_GROSS_BEL_CC_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.)
+-	Group_Q1_2023_GROSS_BEL_CC_Reported_Total_n.a._SA_EBS_n.a._n.a.
+
+
+BMA CC Bel - Curr. Qtr (€) = 
+CALCULATE (
+    [Curr. Qtr (€)],
+    EBS_File[Unique Idenitfier] = "GROSS_BEL_CC_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.",
+    EBS_File[Entity] <> "Eliminations"
+)
+
+
+
+
+Separate Accounts
+(Group_Q1_2023_GROSS_BEL_CC_Reported_Total_n.a._SA_EBS_n.a._n.a.)
+
+
+Unmodelled
+(ANL_Q1_2023_GROSS_BEL_UNMODELLED_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ AB_Q1_2023_GROSS_BEL_UNMODELLED_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ AHL_Q1_2023_GROSS_BEL_UNMODELLED_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ ADKG_Q1_2023_GROSS_BEL_UNMODELLED_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ AIT_Q1_2023_GROSS_BEL_UNMODELLED_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
++ ARE_Q1_2023_GROSS_BEL_UNMODELLED_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.)
+
+
+Eliminations
+Eliminations_Q1_2023_GROSS_BEL_TOTAL_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.
+
+
+Total Gross BEL (before cap) – This is the sum of all of the above.
+‘SBA Gross BEL (before cap)’ + ‘BMA Corporate Curve BEL’ + ‘Separate Accounts’ + ‘Unmodelled’ + ‘Eliminations’
+
+
+Cap Impact
+Group_Q1_2023_GROSS_BEL_Reported_SBA_Cap-Impact_Total_EBS_n.a_n.a
+
+
+Total Gross BEL (after cap)
+‘Total Gross BEL (before cap)’ + ‘Cap Impact’
+
+
+## Topic 3
+
+Hi Jonathan, just updated the data file for Topic 3. Here are the variables that are needed for the table for Q1:
+
+Group_Q4_2023_GROSS_BEL_Reported_SBA_Before-Cap_Total_EBS_n.a_n.a
+
+Group_Q1_2023_GROSS_BEL_AoC_SBA_Run-off_Total_EBS_n.a_n.a
+Group_Q1_2023_GROSS_BEL_AoC_SBA_Rates_Total_EBS_n.a_n.a
+Group_Q1_2023_GROSS_BEL_AoC_SBA_Spread_Total_EBS_n.a_n.a
+Group_Q1_2023_GROSS_BEL_AoC_SBA_Portfolio-Update_Total_EBS_n.a_n.a
+Group_Q1_2023_GROSS_BEL_AoC_SBA_Other_Total_EBS_n.a_n.a
+Group_Q1_2023_GROSS_BEL_AoC_SBA_SBA/CC%-change_Total_EBS_n.a_n.a
+
+Group_Q1_2023_GROSS_BEL_Reported_SBA_Before-Cap_Total_EBS_n.a_n.a
+
+Group_Q1_2023_GROSS_BEL_Reported_SBA_Cap-Impact_Total_EBS_n.a_n.a
+
+Group_Q1_2023_GROSS_BEL_Reported_SBA_After-Cap_Total_EBS_n.a_n.a
+
+
+
+## Topic 4
+
+Unique Idenitfier
+GROSS_BEL_CC_AoC_CC_Allocation-Change_Total_EBS_n.a._n.a.
+GROSS_BEL_CC_AoC_CC_Interest-Rates_Total_EBS_n.a._n.a.
+GROSS_BEL_CC_AoC_CC_Portfolio-Update_Total_EBS_n.a._n.a.
+GROSS_BEL_CC_AoC_CC_Reported-BEL_Total_EBS_n.a._n.a.
+GROSS_BEL_CC_AoC_CC_Roll-Forward_Total_EBS_n.a._n.a.
+
+NET_BEL_CC_AoC_CC_Allocation-Change_Total_EBS_n.a._n.a.
+NET_BEL_CC_AoC_CC_Interest-Rates_Total_EBS_n.a._n.a.
+NET_BEL_CC_AoC_CC_Portfolio-Update_Total_EBS_n.a._n.a.
+NET_BEL_CC_AoC_CC_Reported-BEL_Total_EBS_n.a._n.a.
+NET_BEL_CC_AoC_CC_Roll-Forward_Total_EBS_n.a._n.a.
+
+
+Group_Q4_2022_ GROSS_BEL_CC_AoC_CC_Reported-BEL_Total_EBS_n.a._n.a.
+Group_Q1_2023_ GROSS_BEL_CC_AoC_CC_Roll-Forward_Total_EBS_n.a._n.a.
+Group_Q1_2023_ GROSS_BEL_CC_AoC_CC_Interest-Rates_Total_EBS_n.a._n.a.
+Group_Q1_2023_ GROSS_BEL_CC_AoC_CC_Portfolio-Update_Total_EBS_n.a._n.a.
+Group_Q1_2023_ GROSS_BEL_CC_AoC_CC_Allocation-Change_Total_EBS_n.a._n.a.
+Group_Q1_2023_ GROSS_BEL_CC_AoC_CC_Reported-BEL_Total_EBS_n.a._n.a.
+
+All the inputs there will come from the Analysis of Change files. Will quickly review the figures. Going from Q4 to Q1, the row name should be Q1 interest rates
+
+
+
+ssh-add C:\users\jonathan.paterna\.ssh\id_rsa
+
+
+
+
+
+VAR _Result =
+SWITCH (
+    SELECTEDVALUE ( Topic_3_Parent[Parent] ),
+    "Gross BEL EoY (bef. cap)",
+        SWITCH (
+            SELECTEDVALUE ( Topic_3_Child[Child] ),
+            "Δ SBA BEL", _SBA_BEL_QoQ,
+            "Δ BMA Corp BEL", _BMA_CC_Bel_QoQ,
+            "Δ Separate Accounts", _Separate_Acc_QoQ,
+            "Δ Unmodelled", _Unmodelled_QoQ,
+            "Δ Eliminations", _Eliminations_QoQ,
+            _Gross_Bel_bef_cap_PQ
+        ),
+    "Reported SBA (bef. cap)",
+        SWITCH (
+            SELECTEDVALUE ( Topic_3_Child[Child] ),
+            "Run-Off", BLANK(),
+            "Rates", BLANK(),
+            "Spread", BLANK(),
+            "Portfolio Update", BLANK(),
+            "Other", BLANK(),
+            "SBA/CC Change", BLANK(),
+            _Reported_Bel_BefCap_Impact_CQ
+        )
+)
+RETURN _Result   
+
+
+
+Total Gross BEL (before cap) - Curr. Qtr (€) = 
+[SBA Bel - Gross (before cap) - Curr. Qtr (€)] + [BMA CC Bel - Curr. Qtr (€)] + [SA - Curr. Qtr (€)] + [Unmodelled - Curr. Qtr (€)] + [Eliminations - Curr. Qtr (€)]
+
+
+Bel Life (before cap) - Gross - Curr. Qtr (€) = 
+[Bel Life - Gross - Curr. Qtr (€)] - [Cap. Impact - Curr. Qtr (€)
+
+
+
+
+SBA Bel - Gross (before cap) - Curr. Qtr (€) = 
+CALCULATE (
+    [Curr. Qtr (€)],
+    EBS_File[Unique Idenitfier] = "GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.",
+    EBS_File[Entity] <> "Eliminations"
+)
+
+
+BMA CC Bel - Curr. Qtr (€) = 
+CALCULATE (
+    [Curr. Qtr (€)],
+    EBS_File[Unique Idenitfier] = "GROSS_BEL_CC_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.",
+    EBS_File[Entity] <> "Eliminations"
+)
+
+
+Separate Accounts - Curr. Qtr (€) = 
+CALCULATE (
+    [Curr. Qtr (€)],
+    EBS_File[Unique Idenitfier] = "GROSS_BEL_CC_Reported_Total_n.a._SA_EBS_n.a._n.a."
+)
+
+
+Unmodelled - Curr. Qtr (€) = 
+CALCULATE (
+    [Curr. Qtr (€)],
+    EBS_File[Unique Idenitfier] = "GROSS_BEL_UNMODELLED_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.",
+    EBS_File[Entity] <> "Eliminations"
+)
+
+
+Eliminations - Curr. Qtr (€) = 
+CALCULATE (
+    [Curr. Qtr (€)],
+    EBS_File[Unique Idenitfier] = "GROSS_BEL_TOTAL_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.",
+    EBS_File[Entity] = "Eliminations", ALL ( EBS_File_Entity )
+)
+
+
+
+
+++ Topic 2 - QA
+
+ADKG 
+SBA = 
+AGROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a. - 
+GROSS_BEL_SBA_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a. (Eliminations) - 
+GROSS_BEL_Reported_SBA_Cap-Impact_Total_EBS_n.a_n.a
+
+2309874911 - 
+
+
+
+# Topic 7 - Other Ins. Risk
+
+Mortality (term assurance, whole life, universal life)
+Critical Illness (including accelerated critical illness products)
+Longevity (immediate pay-out annuities, contingent annuities, pension pay-outs)
+Longevity (deferred pay-out annuities, future contingent annuities, future pension pay-outs)
+Annuities certain only
+Deferred accumulation annuities
+Disability Income: active lives - including waiver of premium and long-term care
+Disability income: active lives - other accident and sickness
+Disability income: claims in payment - including waiver of premium and long-term care
+Disability income: claims in payment - other accident and sickness
+Group Life	 
+Group Disability
+Group Health	 
+Stop Loss	 
+Rider (other product riders not included above)
+
+Unique Idenitfier
+NO-GSP_BSCR_LT-OTHERReported_Total_n.a._Trad_n.a._Group-Life_n.a.
+
+NO-GSP_BSCR_LT-OTHERReported_Total_n.a._Trad_n.a._Group-Life_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Mortality_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Critical-Illness_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Longevity-Immediate_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Longevity-Deferred_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Annuities-Certain_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Deferred-Accumulation-Annuities_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Disability-Income-Active-Lives-1_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Disability-Income-Active-Lives-2_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Disability-Income-Claims-In-Payment-1_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Disability-Income-Claims-In-Payment-2_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Group-Life_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Group-Disability_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Group-Health_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Stop-Loss_n.a.
+NO-GSP_BSCR_LT-OTHER_Reported_Total_n.a._Trad_n.a._Rider_n.a.
+
+
+
+
+
+GROSS_BEL_Reported_SBA_Cap-Impact_Total_EBS_n.a_n.a.
+GROSS_BEL_Reported_SBA_Cap-Impact_Total_EBS_n.a._n.a.
+
+
+
+Step
+Allocation-change
+Allocation-change
+BMA-Cap
+Change-in-BSCR
+Change-in-run-off-pattern
+Change-in-yield-curve
+Closing
+EBS_BEL_Gross
+EBS_BEL_Gross_Calculated
+EBS_BEL_Gross_Reported
+EBS_BEL_Net
+EBS_BEL_Net_Calculated
+EBS_BEL_Net_Calculated_RR
+Interest-Rates
+Model-Changes
+Opening
+Other
+Portfolio-update
+Portfolio-update
+QRT_BEL
+Rates
+Reported-BEL-(Curr.Qtr)
+Reported-BEL-(Prev.Qtr)
+Reported-SBA-(after.cap)-(Curr.Qtr)
+Reported-SBA-(bef.cap)-(Curr.Qtr)
+Reported-SBA-(bef.cap)-(Prev.Qtr)
+Roll-Forward
+RR_EBS
+RR_QRT
+RR_QRT_Adjusted
+RR_QRT_Claims_And_RI_receivables/payables
+RR_QRT_DTA
+RR_QRT_Gap
+RR_QRT_Other_Asset_Offset
+RR_SII
+Run-off
+SII_BEL_Gross
+SII_BEL_Gross_After_IME_Adjustment
+SII_BEL_Gross_After_IME_Adjustment_Impact_EBS_Stnd_Curve
+SII_BEL_Gross_After_Updating_Curve
+SII_BEL_Gross_After_Updating_Curve_Impact_IME_on_SBA
+SII_BEL_Gross_After_Updating_Curve_Impact_Revaluing_SBA
+SII_BEL_Gross_After_Updating_IME&SBA
+SII_BEL_Gross_After_Updating_IME&SBA_ChangeFDB
+SII_BEL_Gross_QRT
+SII_BEL_Gross_QRT_Adjusted
+SII_BEL_Gross_QRT_Disc_Diff
+SII_BEL_Gross_QRT_ExpRes
+SII_BEL_Gross_QRT_Gap
+SII_BEL_Gross_QRT_Intermediaries_Payables/Receivables
+SII_BEL_Gross_QRT_OL/TP_Adj
+SII_BEL_Gross_QRT_Other
+SII_BEL_Gross_QRT_Removing_Adj
+SII_BEL_Gross_QRT_RM
+SII_BEL_Gross_QRT_TiedRFB
+SII_BEL_Gross_QRT_Transitional
+SII_BEL_Gross_QRT_Transitional_incl_RM
+SII_BEL_Gross_Replicated
+SII_BEL_Net
+SII_BEL_Net_After_IME_Adjustment
+SII_BEL_Net_After_IME_Adjustment_Impact_EBS_Stnd_Curve
+SII_BEL_Net_After_IME_Adjustment_Impact_Total_SII_Curve
+SII_BEL_Net_After_Updating_Curve
+SII_BEL_Net_After_Updating_Curve_Impact_IME_on_SBA
+SII_BEL_Net_After_Updating_Curve_Impact_Revaluing_SBA
+SII_BEL_Net_After_Updating_IME&Curve
+SII_BEL_Net_After_Updating_IME&SBA
+SII_BEL_Net_After_Updating_IME&SBA_SA_Adjustment
+SII_BEL_Net_After_Updating_IME&SBA_UL_Adjustment
+SII_BEL_Net_Impact_IME_EBS
+SII_BEL_Net_Impact_IME_SII
+SII_BEL_Net_Replicated
+SII_BEL_Net_Replicated_Impact_IME_EBS
+SII_BEL_Net_Replicated_Impact_IME_SII
+Spread
+Verdi
+Verdi-integration
+
+
+
+Topic 03 - AoC_SBA - Dynamic Impact = 
+VAR _Curr_Step = [Topic 03 - AoC_SBA - Curr.Qtr]
+VAR _Prev_Step =
+    CALCULATE (
+        [Topic 03 - AoC_SBA - Curr.Qtr],
+        OFFSET (
+            -1,
+            SUMMARIZE (
+                --FILTER ( ALLSELECTED ( Topic_03_AoC_SBA ), 'Topic_03_AoC_SBA'[Step_Active] = "Y" ),
+                ALLSELECTED ( Topic_03_AoC_SBA ),
+                'Topic_03_AoC_SBA'[Sort],
+                'Topic_03_AoC_SBA'[Step],
+                'Topic_03_AoC_SBA'[Step Name],
+                "@SBA_BEL", CALCULATE ( [Curr.Qtr], 'Topic_03_AoC_SBA'[Step_Active] = "Y" )
+            ),
+            ORDERBY ( 'Topic_03_AoC_SBA'[Sort] )
+        )
+    )
+VAR _Result =
+    IF (
+        SELECTEDVALUE ( Topic_03_AoC_SBA[Impact] ) = "Y"
+            && SELECTEDVALUE ( 'Topic_03_AoC_SBA'[Step_Active] ) = "Y",
+        _Curr_Step - _Prev_Step,
+        BLANK ()
+    )
+RETURN
+    ROUNDUP ( _Result, 1 )
+	
+	
+
+VAR _Eliminations =
+    CALCULATE (
+        [Curr.Qtr],
+        EBS_File[Unique Idenitfier] = "GROSS_BEL_TOTAL_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.",
+        EBS_File[Entity] = "Eliminations"
+    )
+VAR _Eliminations_Group =
+    CALCULATE (
+        [Curr.Qtr],
+        EBS_File[Unique Idenitfier] = "GROSS_BEL_TOTAL_Reported_Total_n.a._Total-Excl-UL_EBS_n.a._n.a.",
+        EBS_File[Entity] = "Eliminations",
+        ALL ( Entity[Entity] )
+    )
+VAR _Result =
+    IF (
+        SELECTEDVALUE ( Entity[Entity] ) = "GROUP",
+        _Eliminations_Group,
+        _Eliminations
+    )
+RETURN
+    _Result
+	
+	
+	
+	
