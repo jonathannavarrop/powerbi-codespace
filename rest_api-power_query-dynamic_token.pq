@@ -1,9 +1,9 @@
 () =>
 let
     // Application configuration in Azure AD
-    clientId = "dcdb3bea-fdcd-49f5-8c08-0784a2e5254b",
-    clientSecret = "KAZ8Q~zV-hf.akCvLPr5L.J2xwWmpFi5w4Qh4b5H",
-    tenantId = "9abfb7ef-54d5-4e7d-925d-d9cb1e15fed0",
+    clientId = "introduce_your_clientID",
+    clientSecret = "introduce_your_clientsecret",
+    tenantId = "introduce_your_tenantID",
     resource = "https://analysis.windows.net/powerbi/api/.default",
     
     // Build the request body to obtain the token
