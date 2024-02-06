@@ -1,0 +1,10 @@
+let
+    Source = Json.Document(Web.Contents("https://api.powerbi.com/v1.0/myorg/groups/dc7c2df4-7b7b-4e2b-b91a-f9e9f0969eb8/datasets/d955b6ab-36b4-4db0-87b4-ec32c7e37fc6/refreshes", [Headers=[Authorization="GetAccessToken()" ]])),
+    #"Converted to Table" = Table.FromRecords({Source}),
+    #"Expanded value" = Table.ExpandListColumn(#"Converted to Table", "value"),
+    #"Expanded value1" = Table.ExpandRecordColumn(#"Expanded value", "value", {"requestId", "id", "refreshType", "startTime", "endTime", "serviceExceptionJson", "status", "refreshAttempts"}, {"value.requestId", "value.id", "value.refreshType", "value.startTime", "value.endTime", "value.serviceExceptionJson", "value.status", "value.refreshAttempts"}),
+    #"Expanded value.refreshAttempts" = Table.ExpandListColumn(#"Expanded value1", "value.refreshAttempts"),
+    #"Expanded value.refreshAttempts1" = Table.ExpandRecordColumn(#"Expanded value.refreshAttempts", "value.refreshAttempts", {"attemptId", "startTime", "endTime", "type", "serviceExceptionJson"}, {"value.refreshAttempts.attemptId", "value.refreshAttempts.startTime", "value.refreshAttempts.endTime", "value.refreshAttempts.type", "value.refreshAttempts.serviceExceptionJson"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded value.refreshAttempts1",{{"@odata.context", type text}, {"value.requestId", type text}, {"value.id", Int64.Type}, {"value.refreshType", type text}, {"value.startTime", type datetime}, {"value.endTime", type datetime}, {"value.serviceExceptionJson", type text}, {"value.status", type text}, {"value.refreshAttempts.attemptId", Int64.Type}, {"value.refreshAttempts.startTime", type datetime}, {"value.refreshAttempts.endTime", type datetime}, {"value.refreshAttempts.type", type text}, {"value.refreshAttempts.serviceExceptionJson", type text}})
+in
+    #"Changed Type"
