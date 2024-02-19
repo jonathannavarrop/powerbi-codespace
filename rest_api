@@ -1,0 +1,6 @@
+https://login.microsoftonline.com/common/oauth2/authorize
+?client_id={client_id}
+&response_type=code
+&redirect_uri={redirect_uri}
+&response_mode=query
+&scope=https://graph.microsoft.com/.default
