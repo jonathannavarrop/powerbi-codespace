@@ -1,0 +1,12 @@
+Formatting_icon_measure =
+VAR _measure1 = [measure1] // change by your measure_name
+VAR _measure1_format = FORMAT ( [measure1], "#,##0" ) // format it as needed
+VAR _result =
+    SWITCH (
+        TRUE(),
+        _measure1 < 0, _measure1_format & " " & UNICHAR ( 9660 ), // icon down
+        _measure1 > 0, _measure1_format & " " & UNICHAR ( 9650 ), // icon up
+        BLANK()
+    )
+RETURN
+    _result
