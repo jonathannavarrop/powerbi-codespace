@@ -1,0 +1,12 @@
+Cumulative Sales =
+VAR LastSalesDate = CALCULATE( LASTDATE( Sales[OrderDate] ), ALL( Sales ) )
+RETURN
+IF(
+    SELECTEDVALUE( Dates[Date] ) > LastSalesDate, BLANK(),
+    CALCULATE( [Total Sales],
+        FILTER(
+            ALLSELECTED( Dates ),
+            Dates[Date] <= MAX( Dates[Date] )
+        )
+    )
+)
