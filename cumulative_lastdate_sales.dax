@@ -1,12 +1,9 @@
 Cumulative Sales =
-VAR LastSalesDate = CALCULATE( LASTDATE( Sales[OrderDate] ), ALL( Sales ) )
-RETURN
-IF(
-    SELECTEDVALUE( Dates[Date] ) > LastSalesDate, BLANK(),
-    CALCULATE( [Total Sales],
-        FILTER(
-            ALLSELECTED( Dates ),
-            Dates[Date] <= MAX( Dates[Date] )
-        )
+VAR _LastSalesDate = LASTDATE ( Sales[OrderDate] )
+VAR _Result =
+    CALCULATE (
+        [Ventas netas (m2)],
+        FILTER ( ALLSELECTED ( d_fechas ), d_fechas[Date] <= _last_sales_date )
     )
-)
+RETURN
+    _result
