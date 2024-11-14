@@ -1,0 +1,45 @@
+"DEFINE
+    VAR __DS0Core =
+        FILTER (
+            SUMMARIZECOLUMNS (
+                'Dim_BU'[BU],
+                'Dim_Heading'[Heading],
+                'Dim_Heading'[Order],
+                'Master_Data_AOCD1'[Capital generation],
+                'Dim_Date'[Year],
+                'Dim_Date'[Quarter],
+                'Dim_Date'[YearQQ],
+                'Dim_Date'[Month],
+                'Dim_Date'[YearMth],
+                ""Total_Act"", 'Measures Table'[Total Act],
+                ""Total_Plan"", 'Measures Table'[Total Plan]
+            ),
+        'Dim_Date'[Quarter] = @QuarterParameter
+        )
+    VAR __DS0BodyLimited =
+        TOPN (
+            500000,
+            __DS0Core,
+            'Dim_BU'[BU], 1,
+            'Dim_Heading'[Order], 1,
+            'Dim_Heading'[Heading], 1,
+            'Master_Data_AOCD1'[Capital generation], 1,
+            'Dim_Date'[Year], 1,
+            'Dim_Date'[Quarter], 1,
+            'Dim_Date'[YearQQ], 1,
+            'Dim_Date'[Month], 1,
+            'Dim_Date'[YearMth], 1
+        )
+
+EVALUATE
+__DS0BodyLimited
+ORDER BY
+    'Dim_BU'[BU],
+    'Dim_Heading'[Order],
+    'Dim_Heading'[Heading],
+    'Master_Data_AOCD1'[Capital generation],
+    'Dim_Date'[Year],
+    'Dim_Date'[Quarter],
+    'Dim_Date'[YearQQ],
+    'Dim_Date'[Month],
+    'Dim_Date'[YearMth]"
