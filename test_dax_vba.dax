@@ -1,4 +1,4 @@
-"DEFINE
+DEFINE
     VAR __DS0Core =
         FILTER (
             SUMMARIZECOLUMNS (
@@ -11,10 +11,14 @@
                 'Dim_Date'[YearQQ],
                 'Dim_Date'[Month],
                 'Dim_Date'[YearMth],
-                ""Total_Act"", 'Measures Table'[Total Act],
-                ""Total_Plan"", 'Measures Table'[Total Plan]
+                "Total_Act", 'Measures Table'[Total Act],
+                "Total_Plan", 'Measures Table'[Total Plan]
             ),
-        'Dim_Date'[Quarter] = @QuarterParameter
+            IF(
+                ISBLANK(@QuarterParameter),
+                TRUE(), -- No aplica filtro si el parámetro es blanco
+                'Dim_Date'[Quarter] = @QuarterParameter
+            )
         )
     VAR __DS0BodyLimited =
         TOPN (
@@ -42,4 +46,4 @@ ORDER BY
     'Dim_Date'[Quarter],
     'Dim_Date'[YearQQ],
     'Dim_Date'[Month],
-    'Dim_Date'[YearMth]"
+    'Dim_Date'[YearMth]
