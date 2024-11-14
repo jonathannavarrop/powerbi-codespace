@@ -46,20 +46,30 @@ ORDER BY
     'Dim_Date'[YearMth]
 
 Sub Macro1()
-    '
-    ' Macro1 - Update DAX Query with Year and Quarter Parameters
-    '
+    ' Select the range of the table
+    Range("SalesDetails").Select
 
-    ' Select the table where the query will be updated
-    Range("CapitalDashboardTable").Select
+    ' Get the values of the parameters from the Excel sheet
+    Dim DaxQuery As String
+    Dim YearParam As String
+    Dim QuarterParam As String
 
-    ' Replace the parameters in the DAX query
+    ' Retrieve the DAX query text and parameter values
+    DaxQuery = Range("DaxQuery").Text
+    YearParam = Range("YearParameter").Text
+    QuarterParam = Range("QuarterParameter").Text
+
+    ' Replace both parameters in the DAX query
+    DaxQuery = Replace(DaxQuery, "@YearParameter", YearParam)
+    DaxQuery = Replace(DaxQuery, "@QuarterParameter", QuarterParam)
+
+    ' Update the QueryTable command text and refresh the query
     With Selection.ListObject.QueryTable
-        .CommandText = Replace(Range("DaxQuery").Text, "@YearParameter", Range("YearParameter").Text)
-        .CommandText = Replace(.CommandText, "@QuarterParameter", Range("QuarterParameter").Text)
+        .CommandText = DaxQuery
         .Refresh BackgroundQuery:=False
     End With
 End Sub
+
 
 Private Sub Worksheet_Change(ByVal Target As Range)
     ' Declare the ranges for the two parameter cells
