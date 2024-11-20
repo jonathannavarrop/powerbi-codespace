@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "properties": {
+    "body": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tables": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "test_results[aws_account_id]": { "type": "string" },
+                          "test_results[error_message]": { "type": "string" },
+                          "test_results[exception]": { "type": "string" },
+                          "test_results[job_run_id]": { "type": "string" },
+                          "test_results[occurred_on]": { "type": "string" },
+                          "aws_accounts[name]": { "type": "string" },
+                          "tests[test_name]": { "type": "string" },
+                          "[Sumis_exception]": { "type": "integer" }
+                        },
+                        "required": [
+                          "test_results[aws_account_id]",
+                          "test_results[error_message]",
+                          "test_results[exception]",
+                          "test_results[job_run_id]",
+                          "test_results[occurred_on]",
+                          "aws_accounts[name]",
+                          "tests[test_name]",
+                          "[Sumis_exception]"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
