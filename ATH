@@ -1,0 +1,314 @@
+' and spaces are replaced by _
+
+ISO 8601 -> 
+formatDateTime(addDays(formatDateTime(variables('Variable - Report Date'), 'yyyy-MM-ddTHH:mm:ssZ'), -10), 'dd/MM/yyyy')
+formatDateTime(item()?['test_results[occurred_on]'], 'dd-MM-yyyy HH:mm:ss')
+if(equals(item()?['Termination_Date_to'], null), null, formatDateTime(item()?['Termination_Date_to'], 'dd-MM-yyyy'))
+
+Is workday? (1= Monday) -> dayOfWeek(utcNow())  
+
+Show error code -> outputs('Refresh_a_dataset')?['statusCode']
+
+outputs('DAX_Measure_-_Max_Occurred')?['body/firstTableRows'][0]?['[Maxoccurred_on]']
+
+LOGIC APPS
+STORE PROC
+UPDATE dmp.t_content_change SET status = @Status, updated_on = getdate(), updated_by = @Approver
+WHERE content_change_id = @ContentChangeId;
+IF @Status = 'Approved' 
+    SELECT @ComponentId = component_id, @ComponentTable = component_table, @IdColumn = id_column, @SetClause = set_clause 
+    FROM dmp.t_content_change 
+    WHERE content_change_id = @ContentChangeId;
+
+    SET @UpdateString = 'UPDATE dmp.' + @ComponentTable + ' SET ' + @SetClause + 
+                        ', updated_by = '''+ @Approver + ''', updated_on = getdate() WHERE ' + @IdColumn + '=' + CAST(@ComponentId as VARCHAR(10));
+    SELECT @UpdateString as stmt into dmp.temp_ttt;
+    EXEC sp_executesql @UpdateString;
+
+SQL TABLE
+	CREATE TABLE dmp.t_owner_change_requests (
+		request_id INT NOT NULL IDENTITY(1,1) PRIMARY KEY,
+		catalog_item_id INT NOT NULL,
+		current_owner_id INT NOT NULL,
+		new_owner_id INT NOT NULL,
+		request_user_id INT NOT NULL,
+		request_date DATETIME NOT NULL DEFAULT GETDATE(),
+		is_authorized BIT NOT NULL DEFAULT 0,
+		authorization_date DATETIME NULL,
+		status VARCHAR(20) NOT NULL DEFAULT 'Pending',
+		due_date DATETIME NOT NULL DEFAULT DATEADD(DAY,7,GETDATE())
+	)
+
+
+
+-------------------
+DAILY WORK - CODE
+-------------------
+#"Sorted Rows" = Table.Sort(#"Removed Columns",{{"employee_id", Order.Ascending}, {"employee_key", Order.Ascending}}),
+    #"Added Index" = Table.AddIndexColumn(#"Sorted Rows", "Index", 0, 1, Int64.Type),
+    #"Added Index1" = Table.AddIndexColumn(#"Added Index", "Index.1", 1, 1, Int64.Type),
+
+-------------------
+CALCULATED COLUMNS
+-------------------
+is_first_employee = // Check if a new employee appear in the index //
+    IF (
+        'd_employee'[Index]
+            = MINX (
+                FILTER (
+                    'd_employee',
+                    'd_employee'[employee_id] = EARLIER ( 'd_employee'[employee_id] )
+                ),
+                'd_employee'[Index]
+            ),
+        TRUE (),
+        FALSE ()
+    )
+
+dif_check = // Check if there are any difference in one of the calculated columns // 
+IF ( 
+    (NOT ( ISBLANK ( 'd_employee'[employee_status_dif] ) ) && 'd_employee'[employee_status_dif]  <> "" ) ||
+    (NOT ( ISBLANK ( 'd_employee'[cost_centre_id_dif] ) )  && 'd_employee'[cost_centre_id_dif]  <> ""  ) ||
+    (NOT ( ISBLANK ( 'd_employee'[company_id_dif] ) )  && 'd_employee'[company_id_dif]  <> "" )
+    , 1, 0 )
+
+
+employee_status_dif = 
+VAR _employee_status_prev =
+    // Calculate the previous status for each employee  //
+    IF (
+        d_employee[is_first_employee] = TRUE (),
+        BLANK (),
+        CALCULATE (
+            MAX ( 'd_employee'[employee_status] ),
+            FILTER (
+                'd_employee',
+                'd_employee'[Index.1] = EARLIER ( 'd_employee'[Index] )
+            )
+        )
+    )
+VAR _result =
+    // Show the result only when there is a difference //
+    IF (
+        'd_employee'[employee_status] <> _employee_status_prev,
+        _employee_status_prev & "  to  " & d_employee[employee_status],
+        BLANK ()
+    )
+RETURN
+    _result
+
+-------------
+DAX MEASURES
+-------------
+Change_flag = 
+IF (
+    ISBLANK ( [Cost Centre ID_dif] ) && ISBLANK ( [Company ID_dif] )
+        && ISBLANK ( [Employee Status ID_dif] )
+        && ISBLANK ( [Country_dif] )
+        && ISBLANK ( [Manager's Name_dif] )
+        && NOT ( ISBLANK ( [Employee's Name_dif] ) ),
+    0,
+    1
+)
+
+Manager's Name_dif = 
+IF (
+    [Date_to] < [Date_from],
+    BLANK (),
+    IF (
+        [Manager's Name_from] <> [Manager's Name_to],
+        [Manager's Name_from] & " to " & [Manager's Name_to],
+        BLANK()
+    )
+)
+
+
+Manager's Name_from = 
+VAR _max_key =
+    CALCULATE (
+        MAX ( d_employee[employee_key] ),
+        FILTER ( d_employee, d_employee[valid_from_] <= [Date_from] ),
+        ALL ()
+    )
+VAR _result =
+    CALCULATE (
+        SELECTEDVALUE ( d_employee[manager_name] ),
+        FILTER ( d_employee, d_employee[employee_key] = _max_key )
+    )
+RETURN
+    _result  
+
+
+Manager's Name_to = 
+VAR _max_key =
+    CALCULATE (
+        MAX ( d_employee[employee_key] ),
+        FILTER ( d_employee, d_employee[valid_from_] <= [Date_to] ),
+        ALL ()
+    )
+VAR _result =
+    CALCULATE (
+        SELECTEDVALUE ( d_employee[manager_name] ),
+        FILTER ( d_employee, d_employee[employee_key] = _max_key )
+    )
+RETURN
+    IF ( [Date_to] < [Date_from], BLANK(), _result  )
+
+
+
+
+Topic 2 Waterfall (€m) = 
+VAR _Total_Gross_Bel_bef_cap_PQ = [Total Gross BEL (before cap) - Prev. Qtr (€)]
+VAR _SBA_BEL_QoQ = [SBA Gross BEL (before cap) - Qtr-o-Qtr (€)]
+VAR _BMA_CC_Bel_QoQ = [BMA CC Bel - Qtr-o-Qtr (€)]
+VAR _Separate_Acc_QoQ = [Separate Accounts - Qtr-o-Qtr (€)]
+VAR _Unmodelled_QoQ = [Unmodelled - Qtr-o-Qtr (€)]
+VAR _Eliminations_QoQ = [Eliminations - Qtr-o-Qtr (€)]
+VAR _Total_Gross_Bel_bef_cap_CQ = [Total Gross BEL (before cap) - Curr. Qtr (€)]
+VAR _Cap_Impact = [TP - Cap. Impact - Gross - Curr. Qtr (€)]
+VAR _Total_Gross_Bel_aft_cap_CQ = [Total Gross BEL (after cap) - Curr. Qtr (€)]
+VAR _Result =
+    SWITCH (
+        SELECTEDVALUE ( Topic_2_Waterfall[step_name] ),
+        "Total Gross BEL (bef. cap) (Prev.Qtr)", _Total_Gross_Bel_bef_cap_PQ,
+        "Δ SBA BEL", _SBA_BEL_QoQ,
+        "Δ BMA Corp BEL", _BMA_CC_Bel_QoQ,
+        "Δ Sep. Acc.", _Separate_Acc_QoQ,
+        "Δ Unmod.", _Unmodelled_QoQ,
+        "Δ Elim.", _Eliminations_QoQ,
+        "Total Gross BEL (bef. cap) (Curr.Qtr)", _Total_Gross_Bel_bef_cap_CQ,
+        "Cap. Imp.", _Cap_Impact,
+        "Total Gross BEL (after cap) (Curr.Qtr)", _Total_Gross_Bel_aft_cap_CQ
+    )
+RETURN
+    _Result
+
+Topic 2 - Curr. Qtr (€m) = 
+VAR _First_Row =
+    MAX ( Dim_Date[EoQ] )
+VAR _SBA_Gross_Bel_bef_cap = [SBA Gross BEL (before cap) - Curr. Qtr (€)]
+VAR _BMA_CC_Bel = [BMA CC Bel - Curr. Qtr (€)]
+VAR _Separate_Acc = [Separate Accounts - Curr. Qtr (€)]
+VAR _Unmodelled = [Unmodelled - Curr. Qtr (€)]
+VAR _Eliminations = [Eliminations - Curr. Qtr (€)]
+VAR _Total_Gross_BEL_bef_cap = [Total Gross BEL (before cap) - Curr. Qtr (€)]
+VAR _Cap_Imp = [TP - Cap. Impact - Gross - Curr. Qtr (€)]
+VAR _Total_Gross_BEL_aft_cap = [Total Gross BEL (after cap) - Curr. Qtr (€)]
+VAR _Result =
+    SWITCH (
+        TRUE (),
+        SELECTEDVALUE ( Topic_2[step_name] ) = BLANK (), _First_Row,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "SBA Gross BEL (before cap)", _SBA_Gross_Bel_Bef_Cap,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "BMA Corporate Curve BEL", _BMA_CC_Bel,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "Separate Accounts", _Separate_Acc,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "Unmodelled", _Unmodelled,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "Eliminations", _Eliminations,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "Total Gross BEL (before cap)", _Total_Gross_BEL_bef_cap,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "Cap Impact", _Cap_Imp,
+        SELECTEDVALUE ( Topic_2[step_name] ) = "Total Gross BEL (after cap)", _Total_Gross_BEL_aft_cap
+    )
+RETURN
+    _Result
+
+-------------
+IMPACTS TABLE
+-------------
+
+Topic 3 - Curr. Qtr (€m) = 
+VAR _Reported_SBA_BefCap_PQ = [SBA - Reported (bef. cap) -  Gross - Prev. Qtr (€)]
+VAR _RunOff = [SBA - Run Off - Gross - Curr. Qtr (€)]
+VAR _Rates = [SBA - Rates - Gross - Curr. Qtr (€)]
+VAR _Spread = [SBA - Spread - Gross - Curr. Qtr (€)]
+VAR _Portfolio = [SBA - Portfolio Update - Gross - Curr. Qtr (€)]
+VAR _Other = [SBA - Other - Gross - Curr. Qtr (€)]
+VAR _CC_Change = [SBA - CC Change - Gross - Curr. Qtr (€)]
+VAR _Reported_SBA_BefCap = [SBA - Reported (bef. cap) -  Gross - Curr. Qtr (€)]
+VAR _BMA_Cap = _Reported_SBA_BefCap + [SBA - Cap. Impact -  Gross - Curr. Qtr (€)]
+VAR _Reported_SBA_AftCap = [SBA - Reported (after cap) -  Gross - Curr. Qtr (€)]
+VAR _Result =
+    SWITCH (
+        SELECTEDVALUE ( Topic_3[step_name] ),
+        "Reported SBA (bef. cap) (Prev.Qtr)", _Reported_SBA_BefCap_PQ,
+        "Run-Off", _RunOff,
+        "Rates", _Rates,
+        "Spread", _Spread,
+        "Portfolio Update", _Portfolio,
+        "Other", _Other,
+        "SBA/CC Change", _CC_Change,
+        "Reported SBA (bef. cap) (Curr.Qtr)", _Reported_SBA_BefCap,
+        "BMA Cap", _BMA_Cap,
+        "Reported SBA (after cap) (Curr.Qtr)", _Reported_SBA_AftCap
+    )
+RETURN
+    _Result
+
+
+Topic 3 - Impact (€m) = 
+VAR _Prev_Step =
+    CALCULATE (
+        [Topic 3 - Curr. Qtr (€m)],
+        ALL ( Topic_3 ),
+        OFFSET ( -1, ALL ( Topic_3[step_sort] ), ORDERBY ( Topic_3[step_sort] ) )
+    )
+VAR _Curr_Step = [Topic 3 - Curr. Qtr (€m)]
+VAR _Result =
+    SWITCH (
+        SELECTEDVALUE ( Topic_3[step_sort] ),
+        1, BLANK (),
+        8, BLANK (),
+        10, BLANK (),
+        _Curr_Step - _Prev_Step
+    )
+RETURN
+    _Result
+
+
+
+-----------
+	PA - mail
+-----------
+
+Variable
+outputs('DAX_measure_-_Report_Date')?['body/firstTableRows'][0]?['[Report_Date]']
+outputs('DAX_measure_-_Manager_changes')?['body/firstTableRows'][0]?['[value]']
+dayOfWeek(utcNow())
+
+-----------
+	PA - App
+-----------
+HTTP Refresh History
+https://api.powerbi.com/v1.0/myorg/groups/@{items('For_each_row_in_dataset_mapping_table')?['group_id']}/datasets/@{items('For_each_row_in_dataset_mapping_table')?['dataset_id']}/refreshes/?$top=1
+
+PARSE JSON
+Content: Body('HTTP_Refresh_History')
+{
+    "type": "object",
+    "properties": {
+        "value": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "refreshType": {
+                        "type": "string"
+                    },
+                    "startTime": {
+                        "type": "string"
+                    },
+                    "endTime": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "serviceExceptionJson": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+}
