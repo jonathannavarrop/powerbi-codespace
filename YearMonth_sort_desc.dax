@@ -1,0 +1,2 @@
+YearMonthSort = 
+RANKX( Calendario, YEAR([Date]) * 100 + MONTH([Date]),, DESC )
