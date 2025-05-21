@@ -81,20 +81,6 @@
 	= Text.Lower([apollo_internal_classification]) = "intra company capital"
 	
 	
---- Connection query ---
-	let
-	    Source = Value.NativeQuery(AmazonRedshift.Database(#"RedshiftHost", #"RedshiftDbName"), 
-	    "select distinct apollointernalclassification, loaddate
-	    from ubs_ods.breakouts_category bc
-	    left outer join risk_reporting_ods.mapping_asset_class mac
-	    on bc.apollointernalclassification = mac.classification 
-	    where mac.classification is null#(lf)
-	    order by 1,2", null, [EnableFolding=true])
-	in
-    Source
-	
-
-
 --- Value distribution ---
 	let
 		 Source = (TableName as table) as table => let
