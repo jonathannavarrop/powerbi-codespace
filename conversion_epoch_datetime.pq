@@ -1,0 +1,5 @@
+#"Epoc Number" = Table.AddColumn(#"Unpivoted Columns", "Date", each Text.BeforeDelimiter(Text.AfterDelimiter([Fecha],"_",1),".",0)),
+#"Remove Fecha" = Table.RemoveColumns(#"Epoc Number",{"Fecha"}),
+#"Tipo cambiado" = Table.TransformColumnTypes(#"Remove Fecha",{{"Date", Int64.Type}}),
+Fecha = Table.AddColumn(#"Tipo cambiado", "Fecha", each #datetime(1970,1,1,0,0,0) + #duration(0,0,0,[Date]/1000)),
+#"Tipo cambiado - datetime" = Table.TransformColumnTypes(Fecha,{{"Fecha", type datetime}}),
