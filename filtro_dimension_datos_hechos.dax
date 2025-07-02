@@ -1,0 +1,6 @@
+Filtro_DimensionTieneDatos = 
+VAR _CountFact = CALCULATE ( COUNTROWS ( 'GDN MDL_FACT' ), TREATAS ( VALUES ( Dim_MaestroServicios[BU-SE-CE-AR-CL-SER-TEAM] ), 'GDN MDL_FACT'[BU-SE-CE-AR-CL-SER-TEAM] ) )
+VAR _CountBill = CALCULATE ( COUNTROWS ( 'GDN MDL_FACT' ), TREATAS ( VALUES ( Dim_MaestroServicios[BU-SE-CE-AR-CL-SER-TEAM] ), 'GDN MDL_FACT_BILL'[BU-SE-CE-AR-CL-SER-TEAM] ) )
+VAR _TotalCount = _CountFact + _CountBill
+VAR _Result = IF ( _TotalCount > 0, 1, 0 )
+RETURN _Result
