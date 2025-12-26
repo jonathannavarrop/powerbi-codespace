@@ -1,0 +1,41 @@
+measure_until_selected_date =
+/*
+-------------
+Purpose
+-------------
+Returns the value of [Measure] accumulated from Jan 1 of the selected year
+up to the end of the month selected in the slicer.
+
+-------------
+Model setup
+-------------
+- dim_calendar: the *connected* calendar table (related to the fact table).
+  Used in the slicer to capture the user's selected date/month.
+- dim_calendar_disconnected: a *disconnected* copy of the calendar used on the X-axis
+  (so the axis is not physically filtered down to a single month).
+- TREATAS transfers the current X-axis date context (disconnected table) to the
+  connected calendar, so the fact table gets filtered correctly.
+*/
+  
+VAR _EndDate =
+    // End of month for the date selected in the slicer (connected calendar)
+    EOMONTH ( MAX ( dim_calendar[Date] ), 0 )
+VAR _StartDate =
+    // Start of the same year (Jan 1)
+    DATE ( YEAR ( _EndDate ), 1, 1 )
+RETURN
+CALCULATE (
+    [Measure],
+
+    // Map the current axis date context (disconnected) to the connected calendar
+    TREATAS ( VALUES ( dim_calendar_disconnected[Date] ), dim_calendar[Date] ),
+
+    // Restrict axis dates to the range Jan 1 .. selected month end
+    KEEPFILTERS (
+        FILTER (
+            ALL ( dim_calendar_disconnected[Date] ),
+            dim_calendar_disconnected[Date] >= _StartDate
+                && dim_calendar_disconnected[Date] <= _EndDate
+        )
+    )
+)
