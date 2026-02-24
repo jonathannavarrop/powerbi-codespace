@@ -107,29 +107,3 @@ let
     #"Changed Type" = Table.TransformColumnTypes(#"Expanded All rows",{{"hit_id", Int64.Type}, {"list_record_active_inactive", type text}, {"pair_modified_date", type date}, {"pair_status", type text}, {"category", type text}, {"application_id", type text}, {"application_name", type text}, {"inactive_date", type text}, {"fs_client_active_inactive", type text}, {"list_record_deleted_notdeleted", type text}})
 in
     #"Changed Type"
-	
-	
-	
-	
-	
-	
---Group rows in the same row
-	--Group by ; Sum 
-= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
-    {{"Equipment", each List.Sum([Equipment.1]), type text}})	
-	
-	--Transform code to:
-= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
-    {{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
-	
-	
-	
-	
-	--Combine rows into a sinlgle line
-		--transform this
-		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
-		{{"Equipment", each List.Sum([Equipment.1]), type text}})
-		
-		-- To this:
-		= Table.Group(#"Merged Columns", {"First Name", "Last Name"}, 
-		{{"Equipment", each Text.Combine([Equipment.1], "; "), type text}})
